@@ -119,6 +119,7 @@ public sealed class TacticalLadderClimb {
     }
     public void Cancel(){Stage=Phase.None;}
     void Fail(ComponentCreature creature,ComponentPathfinding path,double now,string why){
+        if(failed.Count>=32)foreach(var expired in failed.Where(p=>p.Value<=now).Select(p=>p.Key).ToArray())failed.Remove(expired);
         failed[Column]=now+FailCooldown;Stage=Phase.None;path.Stop();
         Log.Information($"[CS_LADDER] {creature.Entity?.ValuesDictionary?.DatabaseObject?.Name} gave up ({why}) column=({Column.X},{Column.Z})");
     }
