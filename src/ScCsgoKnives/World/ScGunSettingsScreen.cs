@@ -227,7 +227,9 @@ public sealed class ScGunSettingsScreen : Screen {
     bool AirdropReadOnly => m_airdropWorld && ScNet.IsRemoteClient;
     void BuildAirdrop(bool narrow) {
         m_content.Children.Add(ScGunUi.Heading("空投"));
-        m_content.Children.Add(ScGunUi.Note(AirdropReadOnly?"联机时由房主设置，这里只能查看。":m_airdropWorld?"当前世界的规则，随世界保存。"
+        // A multiplayer client's copy of the world is not the host's rules: show no values it could mistake for them.
+        if(AirdropReadOnly){m_airdropOn=null;m_content.Children.Add(ScGunUi.Note("联机时由房主在自己的设置里调整。"));return;}
+        m_content.Children.Add(ScGunUi.Note(m_airdropWorld?"当前世界的规则，随世界保存。"
             :GameManager.Project is not null?"当前世界未启用探员包：以下为新世界默认值。"
             :"新世界默认值；已有世界请在世界内修改。"));
         m_airdropOn=ScGunUi.Toggle("定期空投",m_airdrop.Enabled);m_content.Children.Add(m_airdropOn);
@@ -236,7 +238,6 @@ public sealed class ScGunSettingsScreen : Screen {
         foreach(var b in new[]{m_airdropLess,m_airdropMore,m_airdropInput}){b.Margin=new Vector2(3,0);days.Children.Add(b);}
         m_airdropDays=ScGunUi.Label("");m_content.Children.Add(ScGunUi.Row(m_airdropDays,days,narrow));
         m_airdropProgress=ScGunUi.Note("");m_content.Children.Add(m_airdropProgress);
-        if(AirdropReadOnly)foreach(var w in new Widget[]{m_airdropOn,m_airdropLess,m_airdropMore,m_airdropInput})w.IsEnabled=false;
         RefreshAirdrop();
     }
     void RefreshAirdrop() {
