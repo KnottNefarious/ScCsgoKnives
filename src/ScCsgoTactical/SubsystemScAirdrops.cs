@@ -31,28 +31,32 @@ public sealed class SubsystemScAirdrops : Subsystem,IUpdateable,IDrawable {
     public readonly List<Drop> Drops=[];
     readonly Engine.Random random=new();
     readonly PrimitivesRenderer3D renderer=new();
-    SubsystemTerrain terrain;SubsystemPlayers players;SubsystemTime time;SubsystemGameInfo info;
+    SubsystemTerrain terrain;SubsystemPlayers players;SubsystemTime time;SubsystemGameInfo info;SubsystemScAirdropRules rules;
     Texture2D smoke;
-    float next=600,retry;
+    // The 10-15 minute countdown of 1.5.0 and earlier, kept only so those readers find the value they wrote: the schedule
+    // is SubsystemScAirdropRules (every N in-game days) since airdrop-ladder-hud-smoke-20261012.
+    float legacyNext=600;
+    float retry,findRetry;
     double sent,received;
     public UpdateOrder UpdateOrder=>UpdateOrder.Default;
     public int[] DrawOrders=>[10,SubsystemScGrenades.EffectsDrawOrder];
     public override void Load(ValuesDictionary v){
         base.Load(v);if(v.GetValue("Schema",1)!=1)throw new InvalidOperationException("空投存档版本不受支持。");
-        next=v.GetValue("Next",600f);if(!float.IsFinite(next)||next<0||next>900)throw new InvalidOperationException("空投计时无效。");
+        legacyNext=v.GetValue("Next",600f);if(!float.IsFinite(legacyNext)||legacyNext<0||legacyNext>900)throw new InvalidOperationException("空投计时无效。");
         foreach(var row in v.GetValue("Drops",new ValuesDictionary()))Drops.Add(Drop.Load((ValuesDictionary)row.Value));
         if(Drops.Count>Limit||Drops.Select(d=>d.Id).Distinct().Count()!=Drops.Count)throw new InvalidOperationException("空投记录重复或超限。");
         terrain=Project.FindSubsystem<SubsystemTerrain>(true);players=Project.FindSubsystem<SubsystemPlayers>(true);
-        time=Project.FindSubsystem<SubsystemTime>(true);info=Project.FindSubsystem<SubsystemGameInfo>(true);
+        time=Project.FindSubsystem<SubsystemTime>(true);info=Project.FindSubsystem<SubsystemGameInfo>(true);rules=Project.FindSubsystem<SubsystemScAirdropRules>(true);
         smoke=ContentManager.Get<Texture2D>("Textures/ScCsgoTactical/airdrop_smoke");
     }
     public override void Save(ValuesDictionary v){
-        base.Save(v);v.SetValue("Schema",1);v.SetValue("Next",next);var rows=new ValuesDictionary();
+        base.Save(v);v.SetValue("Schema",1);v.SetValue("Next",legacyNext);var rows=new ValuesDictionary();
         for(int i=0;i<Drops.Count;i++)rows.SetValue(i.ToString(),Drops[i].Save());v.SetValue("Drops",rows);
     }
     public static void RegisterNetwork(){
         ScCompatibility.RegisterOwned("Subsystem","ScAirdropDirector");
         ScCompatibility.RegisterOwned("Subsystem","ScAirdrops");
+        ScCompatibility.RegisterOwned("Subsystem",SubsystemScAirdropRules.GroupName);
         ScNet.OnClient(SnapshotOp,r=>GameManager.Project?.FindSubsystem<SubsystemScAirdrops>(false)?.Receive(r));
     }
     public void Receive(ScNetReader r){
@@ -80,16 +84,17 @@ public sealed class SubsystemScAirdrops : Subsystem,IUpdateable,IDrawable {
         return block.IsCollidable_(support)&&!block.ShouldAvoid(support)
             &&Enumerable.Range(p.Y,Math.Min(255,p.Y+37)-p.Y).All(y=>Terrain.ExtractContents(t.GetCellValue(p.X,y,p.Z))==0);
     }
-    void FindDrop(){
-        var living=players.ComponentPlayers.Where(p=>p.ComponentHealth.Health>0).ToArray();if(living.Length==0)return;
+    bool FindDrop(){
+        var living=players.ComponentPlayers.Where(p=>p.ComponentHealth.Health>0).ToArray();if(living.Length==0)return false;
         var origin=living[random.Int(0,living.Length-1)].ComponentBody.Position;
         for(int i=0;i<12;i++){
             float angle=random.Float(0,MathF.PI*2),distance=random.Float(32,56);
             int x=Terrain.ToCell(origin.X+MathF.Cos(angle)*distance),z=Terrain.ToCell(origin.Z+MathF.Sin(angle)*distance);
             if(terrain.Terrain.GetChunkAtCell(x,z) is not {} chunk||chunk.State<TerrainChunkState.InvalidLight)continue;
             int y=terrain.Terrain.GetTopHeight(x,z)+1;
-            if(TryStart(new(x+.5f,y,z+.5f)))return;
+            if(TryStart(new(x+.5f,y,z+.5f)))return true;
         }
+        return false;
     }
     bool Land(Drop drop){
         Point3 p=Terrain.ToCell(drop.Ground);
@@ -122,18 +127,37 @@ public sealed class SubsystemScAirdrops : Subsystem,IUpdateable,IDrawable {
         }
     }
     public static readonly string[] GunPool=["ak47","m4a1s","mp5sd","awp","glock18","xm1014","famas","ssg08"];
-    /// <summary>One gun, two magazines, two small CS material stacks and two vanilla stacks.
-    /// Fixed by delivery identity, so retrying a blocked landing never rerolls the reward.</summary>
+    /// <summary>Vanilla copper and iron armour (helmet, chest plate, leggings, boots), by clothing index (2026-10-12 user choice).</summary>
+    public static readonly int[] ArmorPool=[33,34,35,36,10,3,4,9];
+    /// <summary>One small share of every category (2026-10-12 user choice "每类各一份"): one gun with 2-3 of its own ammunition,
+    /// 1-2 throwables, one CS knife (factory finish), one piece of vanilla copper or iron armour, 3-5 cooked food in two kinds
+    /// and 2-3 stacks of ores, ingots, coal or CS weapon materials. Only items every release already has; each stack within its
+    /// block's stacking. Fixed by delivery identity, so retrying a blocked landing never rerolls the reward.</summary>
     public static (int Value,int Count)[] RewardsFor(string id){
         var seed=Guid.ParseExact(id,"N").ToByteArray();
         int variant=Array.FindIndex(GunSpec.All,g=>g.Name==GunPool[seed[0]%GunPool.Length]);
         if(variant<0)throw new InvalidOperationException("空投枪械目录缺失。");
-        int gun=Terrain.MakeBlockValue(BlocksManager.GetBlockIndex<ScGunBlock>(true),0,GunSpec.WithId(variant,GunSpec.FreshFull));
-        return [(gun,1),(ScAmmoBlock.Value(ScAmmoBlock.Magazine),2),
-            (ScWeaponMaterialBlock.Value(ScWeaponMaterialBlock.Blank),1+seed[1]%3),
-            (ScWeaponMaterialBlock.Value(1+seed[2]%4),1),
-            (Terrain.MakeBlockValue(IronIngotBlock.Index),2),
-            (Terrain.MakeBlockValue(seed[3]%2==0?CopperIngotBlock.Index:CoalChunkBlock.Index),2)];
+        var knives=Enumerable.Range(0,CsmcKnifeRig.KnifeCount).Where(ScMinimalEdition.KnifeAvailable).ToArray();
+        if(knives.Length==0)throw new InvalidOperationException("空投刀具目录缺失。");
+        var r=new Engine.Random(BitConverter.ToInt32(seed,4)^BitConverter.ToInt32(seed,8)^BitConverter.ToInt32(seed,12));
+        List<(int,int)> loot=[(Terrain.MakeBlockValue(BlocksManager.GetBlockIndex<ScGunBlock>(true),0,GunSpec.WithId(variant,GunSpec.FreshFull)),1),
+            (ScAmmoBlock.Value(ScReloadTransaction.AmmoKind(GunSpec.All[variant])),r.Int(2,3))];
+        int grenade=r.Int(0,5),second=r.Bool()?r.Int(0,5):-1;
+        if(second==grenade)loot.Add((ScGrenadeBlock.Value(grenade),2));
+        else{loot.Add((ScGrenadeBlock.Value(grenade),1));if(second>=0)loot.Add((ScGrenadeBlock.Value(second),1));}
+        loot.Add((Terrain.MakeBlockValue(BlocksManager.GetBlockIndex<ScKnifeBlock>(true),0,ScKnifeSkinCatalog.With(knives[r.Int(0,knives.Length-1)],ScKnifeSkinCatalog.None)),1));
+        loot.Add((Terrain.MakeBlockValue(ClothingBlock.Index,0,ClothingBlock.SetClothingIndex(0,ArmorPool[r.Int(0,ArmorPool.Length-1)])),1));
+        int[] foods=[BreadBlock.Index,CookedMeatBlock.Index,CookedFishBlock.Index,CookedBirdBlock.Index];
+        int food=r.Int(0,foods.Length-1),otherFood=(food+r.Int(1,foods.Length-1))%foods.Length;
+        loot.Add((Terrain.MakeBlockValue(foods[food]),r.Int(2,3)));loot.Add((Terrain.MakeBlockValue(foods[otherFood]),r.Int(1,2)));
+        (int Value,int Min,int Max)[] resources=[(Terrain.MakeBlockValue(IronOreChunkBlock.Index),2,4),(Terrain.MakeBlockValue(MalachiteChunkBlock.Index),2,4),
+            (Terrain.MakeBlockValue(GermaniumOreChunkBlock.Index),1,2),(Terrain.MakeBlockValue(SaltpeterChunkBlock.Index),2,4),
+            (Terrain.MakeBlockValue(SulphurChunkBlock.Index),2,4),(Terrain.MakeBlockValue(CoalChunkBlock.Index),2,4),
+            (Terrain.MakeBlockValue(IronIngotBlock.Index),2,3),(Terrain.MakeBlockValue(CopperIngotBlock.Index),2,3),
+            (ScWeaponMaterialBlock.Value(ScWeaponMaterialBlock.Blank),1,3),(ScWeaponMaterialBlock.Value(1+r.Int(0,3)),1,1)];
+        int stacks=r.Int(2,3);var order=Enumerable.Range(0,resources.Length).ToList();
+        for(int i=0;i<stacks;i++){int pick=r.Int(0,order.Count-1);var res=resources[order[pick]];order.RemoveAt(pick);loot.Add((res.Value,r.Int(res.Min,res.Max)));}
+        return loot.ToArray();
     }
     public void Update(float dt){
         dt=Math.Max(0,dt);
@@ -148,9 +172,12 @@ public sealed class SubsystemScAirdrops : Subsystem,IUpdateable,IDrawable {
                     &&Terrain.ExtractContents(terrain.Terrain.GetCellValue(p.X,p.Y,p.Z))!=BlocksManager.GetBlockIndex<ScAirdropBlock>(true))Drops.Remove(d);
             }
         }
+        // Every N in-game days by this world's own airdrop rules (2026-10-12), independent of the natural enemy-squad switch.
+        // A due drop that finds no place (no open ground nearby, or no room for the five guards) retries every 30 s.
         if(ScModes.Of(Project) is null&&info.WorldSettings.GameMode>=GameMode.Survival&&info.WorldSettings.EnvironmentBehaviorMode==EnvironmentBehaviorMode.Living
-            &&Project.FindSubsystem<SubsystemTacticalEnemies>(true).Rules.Natural){
-            next=Math.Max(0,next-dt);if(next==0){FindDrop();next=Drops.Count>0?random.Float(600,900):30;}
+            &&rules.Due){
+            findRetry=Math.Max(0,findRetry-dt);
+            if(findRetry==0){if(FindDrop())rules.Delivered();else findRetry=30;}
         }
         if(ScNet.IsHost&&Time.RealTime>=sent){sent=Time.RealTime+.5;ScNet.Broadcast(SnapshotOp,w=>{
             w.Int(Drops.Count);foreach(var d in Drops)w.String(d.Id).Vector3(d.Ground).Float(d.Fall).Float(d.Smoke).Bool(d.Landed);

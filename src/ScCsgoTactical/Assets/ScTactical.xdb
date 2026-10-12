@@ -6,6 +6,9 @@
     <MemberSubsystemTemplate Name="ScAirdropDirector" Guid="1ad31453-81c0-4ecb-ab11-b485df0e2bd8" InheritanceParent="fefb9590-4972-4893-b02a-76063611b745">
       <Parameter Name="Class" Guid="a8790209-312f-491a-b228-d8199d2183f2" Value="Game.SubsystemScAirdrops" Type="string" />
     </MemberSubsystemTemplate>
+    <MemberSubsystemTemplate Name="ScAirdropRules" Guid="11cd5975-6d3c-4e16-adde-66130051a1e0" InheritanceParent="fefb9590-4972-4893-b02a-76063611b745">
+      <Parameter Name="Class" Guid="ef04212b-ea1a-4498-9a8d-248ff95a8b74" Value="Game.SubsystemScAirdropRules" Type="string" />
+    </MemberSubsystemTemplate>
     <MemberSubsystemTemplate Name="ScTactical" Guid="cc74fbb5-ae4d-588c-8468-0afa75e0fc58" InheritanceParent="fefb9590-4972-4893-b02a-76063611b745">
       <Parameter Name="Class" Guid="512cff17-65b8-540d-8ac5-7d8d89a80a38" Value="Game.SubsystemScTactical" Type="string" />
     </MemberSubsystemTemplate>

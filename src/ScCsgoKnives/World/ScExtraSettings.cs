@@ -32,6 +32,22 @@ public static class ScEnemyRulesBridge {
     /// <summary>Progress of the given rules in the given world, for display only.</summary>
     public static Func<GameEntitySystem.Project,ScEnemyRules,string> Progress;
 }
+/// <summary>Scheduled airdrops of one world (2026-10-12 user request: "空投过于频繁建议15天游戏时间一次……可以开关的设置 自己调节
+/// 空投的天数"): on/off and whole in-game days between two drops, counted in accumulated game time of the engine's current
+/// DayDuration like <see cref="ScEnemyRules"/>. Independent of the natural enemy-squad switch.</summary>
+public readonly record struct ScAirdropRules(bool Enabled,int Days) {
+    public const int DefaultDays=15,MaxDays=365;
+    public static readonly ScAirdropRules Default=new(true,DefaultDays);
+    public ScAirdropRules Normalize()=>new(Enabled,Math.Clamp(Days,1,MaxDays));
+}
+/// <summary>Implemented by the agents package; null while it is not installed. Write refuses on a multiplayer client: the
+/// host's world owns the rules.</summary>
+public static class ScAirdropRulesBridge {
+    public static Func<GameEntitySystem.Project,ScAirdropRules?> Read;
+    public static Func<GameEntitySystem.Project,ScAirdropRules,bool> Write;
+    /// <summary>Progress of the given rules in the given world, for display only.</summary>
+    public static Func<GameEntitySystem.Project,ScAirdropRules,string> Progress;
+}
 public static class ScEnemySpawnPolicy {
     public const int GraceDays=30;
     public static bool Allows(bool enabled,double elapsed,double daySeconds)=>AllowsAfter(enabled,elapsed,daySeconds,GraceDays);
