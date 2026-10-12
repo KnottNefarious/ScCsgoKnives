@@ -99,6 +99,8 @@ public sealed class ScAmmoHud : IDisposable {
     };
     ContainerWidget host;
     public readonly ScMagazineWidget Magazine = new();
+    /// <summary>Smallest panel used for placement and as the layout editor's proxy: the 40-high icon above the rounds line.</summary>
+    public static readonly Vector2 MinSize = new(116, 60);
     public static IEnumerable<Widget> Obstacles(ContainerWidget container) {
         foreach (var w in container.Children) {
             if (!w.IsVisibleGlobal || w.Name == "ScAmmoHud") continue;
@@ -124,7 +126,7 @@ public sealed class ScAmmoHud : IDisposable {
     }
     void Position() {
         if (host is null || host.ActualSize.X <= 1) return;
-        Vector2 size = new(Math.Max(116, Panel.ActualSize.X), Math.Max(76, Panel.ActualSize.Y));
+        Vector2 size = Vector2.Max(MinSize, Panel.ActualSize);
         Vector2 corner;
         if(ScUiSettings.AmmoHud.Custom){corner=ScUiSettings.AmmoHud.Position(host.ActualSize,size);Panel.RenderTransform=ScUiSettings.AmmoHud.Transform(size);}
         else{
