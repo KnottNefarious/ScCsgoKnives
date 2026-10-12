@@ -1,6 +1,6 @@
 # 空投设置与内容、探员爬梯、手机弹药 HUD 间距、烟雾圆柱（2026-10-12）
 
-Status: implementing
+Status: review（候选已交付用户验收；合并 main 需另行批准）
 Current writer: VPS Claude（源码编辑）；Git 写操作经 Windows 作业
 Branch: `feat/airdrop-ladder-hud-smoke`（基于 `origin/main` `1c27887`）
 User-authorized scope: 用户 2026-10-12 提出四项优化并确认下文设计；分支开发、提交、推送任务分支。合并 main 需另行批准。
@@ -59,6 +59,76 @@ Out of scope: 往用户手机或 Mods 安装包（用户选定 HUD 方案 a 后�
 
 HUD → 烟雾 → 空投 → 爬梯，各自独立的 Conventional Commit；本说明随首个提交入库并原位更新。完成后构建开发候选（全量/轻量/探员），跑相关回归与兼容切换检查，再交付用户验收。
 
-## 结果
+## 结果（2026-10-12，进行中）
 
-（实施中，按项更新。）
+### 提交
+
+`063477a` 任务说明 · `3d07a95` fix(hud) · `20cc525` feat(smoke) · `ea6186b` feat(tactical) 空投 · `fc56fd9` feat(tactical) 爬梯。
+
+### 已执行的检查
+
+快速候选 = 正式 1.5.0 全量包（`cea8f888…`）只替换本分支构建的 DLL（及探员 xdb），位于 Windows `.tmp/dev-temp/als-20261012/qN/`，脚本 `quick.py`。不是交付包。
+
+| 检查 | 输入 | 结果 |
+|---|---|---|
+| HUD `features130-only` | q5 候选 / 正式 1.5.0 | 19/19；正式 1.5.0 在新增项失败（"icon canvas leaves an empty strip below the silhouette: 56"），区分修复前后 |
+| 烟雾 `visual-checkset` | q4 候选 / 正式 1.5.0 | 98 项中 3 项失败，与正式 1.5.0 完全相同的 3 项（见下）；新增的圆柱遮挡全部通过，扩散阶段最低覆盖 0.853（要求 ≥0.85，余量小） |
+| 探员 AI `tactical-ai-only` | q5 候选 / 正式 1.5.0 | 89/89；正式 1.5.0 在新增的空投内容、空投规则、爬梯 3 项失败 |
+| 爬梯实机 `sp_ladders.py lad1` | API **1.9.3.1** 隔离副本，q5（`b0238d0e…`） | 10/10、零游戏错误：同伴上梯、下梯，敌人追上平台；轨迹连续无瞬移（结果 `.tmp/mp-m0-20260929/results/ladders-lad1.json`） |
+| 空投实机 `sp_airdrops.py ad6` | API **1.9.3.1**，q5 | 13 项通过后在"取出的枪能开火"失败（抽到 SSG08）。保留失败结果 `airdrops-ad6.json` |
+| 空投实机 `sp_airdrops.py ad7` | API **1.9.3.1**，q5 | 22 通过 / 1 未运行（又抽到 SSG08，开火项按诊断记为未运行）/ 0 失败、零游戏错误：10 格七类物资、重进不补不重、默认 15 天、关闭不投、开启重新计时、到期实际投放、投后重新计时 |
+
+烟雾三项 `smoke-view/*/clear-lines-of-sight-stay-clear` 在正式 1.5.0 上同样失败：该测试要求每种情况至少 50 条"清晰视线"，但其网格最多生成 24 条，任何版本都无法通过。属既有测试设计问题，本任务未改。
+
+SSG08 诊断（`diag_fire.py`，1.9.3.1）：测试框架单次 `DIG_RAY` 按键在正式 1.5.0 与候选上都无法让全新 SSG08 开火（等 1.5 s / 4 s 均如此），AK47 两者都能。非本任务引入；另行报告，不在本任务内修改。空投实机脚本对栓动狙击枪改为把该项记为"未运行"，其余检查照常。
+
+### 正式候选（阶段 `als1`，源码 `715e9e4`）
+
+Windows 作业 `53b0db0c7caf4a5b979e17ce6fdf09f8`，9.3 分钟，`failed steps: []`。玩法身份 `fc09fef3de8278a25722ffbef444e852`。
+
+| 包 | 字节 | SHA-256 |
+|---|---|---|
+| `[API1.9]CS武器1.5.0-全量包.scmod` | 531277285 | `db1a1dec336924b48bac49be79286848eca968fe660d3540a1818734f0a84925` |
+| `[API1.9]CS武器1.5.0-轻量包.scmod` | 35781342 | `b2b4732b3ca9507c3f7c7a100f168809e1ea3d185c51921092ec5e0bc82e66fa` |
+| `[API1.9]CS武器1.5.0-探员包.scmod` | 42805649 | `4671da590805d073551e5aff0f7934b76466f898bc72e40d3a49b5de9d6783fd` |
+
+| 闸门 | 结果 |
+|---|---|
+| 默认回归 main 全量 / 轻量 | 3/14192、3/14501 失败，均为上述既有的 `smoke-view/*/clear-lines-of-sight-stay-clear`；相对正式包基线无新增失败；物品旅行 24、射击节奏 14、快速投掷 73 全过 |
+| 探员 AI ai 全量 / 轻量 | 90/90、90/90 |
+| 视频反馈集 vf 全量 / 轻量 | 292/292、292/292 |
+| C4 + Sushi 联动 | 140/140、140/140 |
+| 分体 split-core / split-agents、原生 native-full | 通过 |
+| 探员完整套件 | 140 项中 4 项失败，全部在已知清单（`native-gltf/ct`、`native-gltf/t`、`npc-full-registry-reload-refuses-without-ammo-loss`、`optional-package-identity-and-no-bundled-engine`），清单外 0 |
+| 兼容 family / switching-140 / switching-150 | 251/251、249/249、251/251；新增 `airdrop-rules-survive-older-reader-two-rounds` 对正式 1.4.0 全量（`3b42624a…` 核心）、1.4.0 轻量（`2fe9a154…`）、1.5.0 全量（`7de5c8d1…`）均通过 |
+| 原生钩子、全量/轻量集成（both/reversed/none）、背包 | 通过 |
+| 设置/界面 ui、探员动作 motion、热点 hotspots | 通过 |
+
+未选步骤：`netloop`、`appnet`、`throw`（本任务未改联机枪械状态与投掷）。
+
+### 最终候选上的实机与联机
+
+Windows 作业 `05b9ecb350f94b1dafe78c503bd197d2`：`m0.py candpkg als1`（测试副本 `dev-als1-{full,lite,agents}.scmod` 与候选逐字节相同）后依次运行。
+
+| 检查 | 引擎 / 包 | 结果 |
+|---|---|---|
+| `sp_ladders.py lad2` | API **1.9.3.1**，全量 `db1a1dec…` | 10/10、零游戏错误（`results/ladders-lad2.json`） |
+| `sp_airdrops.py ad8` | API **1.9.3.1**，全量 `db1a1dec…` | 22/22、零游戏错误；本次枪械非栓动狙击，"取出的枪能开火"实际运行并通过（`results/airdrops-ad8.json`） |
+| `mp_ladders.py als1 full` | **1.9.3.2_MP**（MP 构建 `622976cc…`），房主＋客户端，全量 `db1a1dec…` | 12/12、两端零游戏错误：客户端看到同伴爬上平台（7 个梯上采样），梯上两端均无下落姿势；客户端写空投规则被拒、房主规则不变、房主写入生效（`results/ladders-mp-als1-full.json`） |
+
+上表结果路径均在 Windows `.tmp/mp-m0-20260929/`。
+
+### 交付（开发测试候选，未发布）
+
+`output/airdrop-ladder-hud-smoke-review-20261013/`：上表三个候选包（复制后哈希复核）、`说明.txt`、`candidate.json`。output 根目录的正式 1.5.0 包未改动；未安装到任何 Mods 或手机。
+
+### 清理
+
+`cleanup-receipt-q1-q4.json`（4.66 GB）与 `cleanup-receipt-q5.json`，位于 `.tmp/dev-temp/als-20261012/`；永久删除，均可用 `quick.py` 按记录的源码身份重建。保留阶段 `als1`（用户正在验收的候选）与 `dev-als1-*` 测试副本。
+
+### 未覆盖 / 待验收
+
+- 用户验收：手机右下弹药图标与"子弹/弹匣"一行的间距；烟雾上下等粗的观感；设置页"空投"一节；空投箱内容是否合适。代理未在手机上安装或运行。
+- Android 未测；联机只测了全量编辑版（未测轻量＋探员混合房间）。
+- 烟雾扩散阶段遮挡余量小（0.853 对 0.85 门槛）。
+- 既有问题（非本任务）：测试框架单次 `DIG_RAY` 不能让全新 SSG08 开火（正式 1.5.0 同样）；`smoke-view/*/clear-lines-of-sight-stay-clear` 测试网格无法满足自身要求。
