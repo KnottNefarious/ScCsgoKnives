@@ -19,6 +19,7 @@ public sealed class ComponentTacticalCompanion : ComponentBehavior,IUpdateable,I
     ComponentBody lastVoiceTarget;
     TacticalOrder? lastVoiceOrder;
     double threatUntil,nextPath,nextShot,reloadAt,nextScan,nextFlee,nextJump,unreachableNotice;int fleeAttempt,stuckStage;
+    readonly TacticalLadderClimb ladder=new();
     Vector3? ownerAnchor,detour;
     ScReloadTransaction reload;
     readonly ScWeaponActionTimeline actions=new();
@@ -109,7 +110,7 @@ public sealed class ComponentTacticalCompanion : ComponentBehavior,IUpdateable,I
         return null;
     }
     void StopMoving(){
-        path.Stop();var pilot=path.m_componentPilot;pilot.m_turnOrder=Vector2.Zero;pilot.m_walkOrder=null;pilot.m_swimOrder=null;pilot.m_flyOrder=null;
+        ladder.Cancel();path.Stop();var pilot=path.m_componentPilot;pilot.m_turnOrder=Vector2.Zero;pilot.m_walkOrder=null;pilot.m_swimOrder=null;pilot.m_flyOrder=null;
         Creature.ComponentLocomotion.TurnOrder=Vector2.Zero;Creature.ComponentLocomotion.WalkOrder=null;
     }
     public void Died(){if(DeathHandled)return;
@@ -138,11 +139,14 @@ public sealed class ComponentTacticalCompanion : ComponentBehavior,IUpdateable,I
         // Danger outranks orders and combat: leave fire and a bomb radius whose fuse reached the evacuation time.
         var zones=TacticalDanger.Zones(Project,body.Position,false).ToList();
         if(TacticalDanger.Urgent(zones,body.Position) is {} danger){
+            ladder.Cancel();
             if(path.IsStuck){fleeAttempt++;nextFlee=0;}
             if(now>=nextFlee||!path.Destination.HasValue){nextFlee=now+.5;path.SetDestination(TacticalDanger.Exit(zones,danger,body.Position,body.Matrix.Forward,fleeAttempt),.8f,1.2f,250,false,true,true,null);}
             Status=danger.Bomb?"撤离爆炸范围":"离开火区";nextPath=now;return;
         }
         fleeAttempt=0;
+        // A ladder climb in progress owns the movement until it arrives or gives up (no fighting with both hands on a ladder).
+        if(ladder.Busy){if(ladder.Update(Creature,Project.FindSubsystem<SubsystemTerrain>(true),path,now)){reload?.Cancel();reload=null;Status="爬梯子";return;}nextPath=now;stuckStage=0;}
         string voiceRole=VoiceRole;
         if(lastVoiceOrder.HasValue&&lastVoiceOrder.Value!=Order)ScAgentVoice.Emit(Entity,voiceRole,Order==TacticalOrder.Follow?"follow":"wait");
         lastVoiceOrder=Order;
@@ -171,8 +175,10 @@ public sealed class ComponentTacticalCompanion : ComponentBehavior,IUpdateable,I
             }
             dest=TacticalDanger.Clamp(zones,dest,body.Position); // wait on the safe ring instead of following into a live bomb radius or fire
             if(Vector2.DistanceSquared(body.Position.XZ,dest.XZ)>radius*radius||Math.Abs(body.Position.Y-dest.Y)>(ignoreHeight?1.5f:.9f)){
+                // A goal more than a step above or below with a ladder nearby leading there: climb it (2026-10-12).
+                if(!ignoreHeight&&ladder.TryStart(Creature,Project.FindSubsystem<SubsystemTerrain>(true),path,dest,5,now)){stuckStage=0;detour=null;}
                 // Let native navigation own rotation while walking. Do not continually restart its state machine.
-                if(path.IsStuck){
+                else if(path.IsStuck){
                     // Bounded recovery: wait and re-plan, then one side detour, then report and pause; never roam or teleport.
                     stuckStage++;StopMoving();detour=null;nextPath=now+(stuckStage>=3?4:2);
                     if(stuckStage==2)detour=Detour(body,dest);

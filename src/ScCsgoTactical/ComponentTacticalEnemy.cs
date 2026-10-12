@@ -11,6 +11,7 @@ public sealed class ComponentTacticalEnemy : ComponentBehavior,IUpdateable,INois
     ComponentPathfinding path;SubsystemTacticalEnemies director;SubsystemTerrain terrain;SubsystemBodies bodies;SubsystemTime time;
     readonly Engine.Random random=new();
     float senseLeft,pathLeft,lost,aim,plant,burstPause,search,fleeLeft,patrolDelay;int burst,fleeAttempt,patrolStep;double nextJump;
+    readonly TacticalLadderClimb ladder=new();
     /// <summary>True while the current target attacked this enemy first: a bounded retaliation, not proactive aggro.</summary>
     public bool Retaliating;
     // 2026-10-06 follow-up: gunfire provokes healthy enemies; only wounded enemies seek escape/cover.
@@ -185,7 +186,7 @@ public sealed class ComponentTacticalEnemy : ComponentBehavior,IUpdateable,INois
         // Danger outranks blindness and combat: a squad knows its own bombs, and nobody stands in fire on purpose.
         var zones=TacticalDanger.Zones(Project,body.Position,true).ToList();fleeLeft-=dt;
         if(TacticalDanger.Urgent(zones,body.Position) is {} danger){
-            aim=0;CancelThrow();AbandonPlant();body.TargetCrouchFactor=0;
+            aim=0;CancelThrow();AbandonPlant();body.TargetCrouchFactor=0;ladder.Cancel();
             if(path.IsStuck){fleeAttempt++;fleeLeft=0;}
             if(fleeLeft<=0||!path.Destination.HasValue){fleeLeft=.65f;path.SetDestination(TacticalDanger.Exit(zones,danger,body.Position,body.Matrix.Forward,fleeAttempt),.9f,1.5f,200,true,true,true,null);}
             return;
@@ -208,6 +209,8 @@ public sealed class ComponentTacticalEnemy : ComponentBehavior,IUpdateable,INois
         // A throw or the recovery after planting runs to its end; nothing else is done meanwhile.
         if(throwing is not null){AdvanceThrow();return;}
         if(plantedAt>=0){path.Stop();if(time.GameTime-plantedAt>=PlantRecovery){plantedAt=-1;body.TargetCrouchFactor=0;Redraw();pathLeft=0;}return;}
+        // A ladder climb in progress owns the movement until it arrives or gives up; no aim builds up on the ladder (2026-10-12).
+        if(ladder.Busy){if(ladder.Update(Creature,terrain,path,time.GameTime)){aim=0;return;}pathLeft=0;}
         senseLeft-=dt;pathLeft-=dt;strafeLeft-=dt;patrolDelay-=dt;
         if(TargetBody is not null){
             // Proactive targets are released beyond the disengage range or when chasing too far from home;
@@ -233,7 +236,12 @@ public sealed class ComponentTacticalEnemy : ComponentBehavior,IUpdateable,INois
         // A summoned squad's warning window: no aim accumulates, so fire starts only after the full aim time that follows.
         if(!clear||State.Warmup>0||State.Role==TacticalRole.Sniper&&body.Velocity.XZ.LengthSquared()>.09f)aim=0;else aim+=dt;
         // Chasing never leads back into a known bomb radius or fire; inside one (before the evacuation time) walk out while still fighting.
-        void Go(Vector3 dest,float speed,float range,int limit,ComponentBody avoid)=>TacticalNavigation.Navigate(path,TacticalDanger.Clamp(zones,dest,body.Position),speed,range,limit,true,false,true,avoid);
+        void Go(Vector3 dest,float speed,float range,int limit,ComponentBody avoid){
+            dest=TacticalDanger.Clamp(zones,dest,body.Position);
+            // A goal more than a step above or below with a ladder nearby leading there: climb it (2026-10-12).
+            if(ladder.TryStart(Creature,terrain,path,dest,10,time.GameTime))return;
+            TacticalNavigation.Navigate(path,dest,speed,range,limit,true,false,true,avoid);
+        }
         if(pathLeft<=0){pathLeft=.65f;
             if(zones.FirstOrDefault(z=>z.Bomb&&TacticalDanger.Horizontal(body.Position,z.Center)<z.Radius+TacticalDanger.BombMargin) is {Bomb:true} hold)
                 path.SetDestination(TacticalDanger.Exit(zones,hold,body.Position,body.Matrix.Forward,fleeAttempt),.65f,1.5f,200,true,true,true,null);

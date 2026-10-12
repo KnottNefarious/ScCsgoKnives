@@ -185,9 +185,11 @@ public sealed class ComponentTacticalModel : ComponentCreatureModel, IScLogicalP
     }
     readonly TacticalAirState air=new();
     /// <summary>Jump/in-air state for the CS2 air clips: airborne only after a short genuine time off the ground
-    /// (smooth steps never flicker), never on ladders, in water or when dead. See <see cref="TacticalAirState"/>.</summary>
+    /// (smooth steps never flicker), never on ladders, in water or when dead. See <see cref="TacticalAirState"/>. A multiplayer
+    /// client has no LadderValue for a server-driven agent: the ladder cell at its feet counts there too (2026-10-12).
     public static bool Grounded(ComponentCreature creature)=>creature.ComponentBody.StandingOnValue.HasValue||creature.ComponentBody.StandingOnBody is not null
-        ||creature.ComponentBody.ImmersionFactor>.3f||creature.ComponentLocomotion?.LadderValue.HasValue==true||creature.ComponentHealth.Health<=0;
+        ||creature.ComponentBody.ImmersionFactor>.3f||creature.ComponentLocomotion?.LadderValue.HasValue==true||creature.ComponentHealth.Health<=0
+        ||TacticalLadderClimb.OnLadder(creature.Project?.FindSubsystem<SubsystemTerrain>(false),creature.ComponentBody);
     public const float AirDebounce=TacticalAirState.Debounce;
     public TacticalAirState Air=>air;
     /// <summary>The actor's crouch: an enemy's own (NPC bodies cannot crouch natively, see ComponentTacticalEnemy.Crouching),
