@@ -81,9 +81,11 @@ static class FeedbackSeptember18Regression {
                 for(int r=0;r<2;r++){var project=new Project();project.m_subsystems.Add(new SubsystemTime());project.m_subsystems.Add(new SubsystemTerrain());project.m_subsystems.Add(new SubsystemPlayers());project.m_subsystems.Add(new SubsystemBodies());project.m_subsystems.Add(new SubsystemGameInfo());
                     var sub=(Subsystem)Activator.CreateInstance(T("SubsystemScGrenades"));sub.m_project=project;sub.Load(d);d=new ValuesDictionary();sub.Save(d);var xml=new XElement("Values");d.Save(xml);d=new ValuesDictionary();d.ApplyOverrides(XElement.Parse(xml.ToString()));
                     var b=d.GetValue<ValuesDictionary>("Blindness").GetValue<ValuesDictionary>("987");if(b.GetValue<float>("Left")!=5.5f||b.GetValue<float>("Immune")!=8.5f)return false;}return true;});
-            Test("smoke-ellipsoid-extents-and-core",()=>{var s=Activator.CreateInstance(T("ScGrenadeState"));Set(s,"Kind",2);Set(s,"Effect",true);Set(s,"Age",2f);Set(s,"Remaining",12f);
+            // 2026-10-12: an upright cylinder (same width at every height) replaced the dome; (3,3,0) was outside the dome.
+            Test("smoke-cylinder-extents-and-core",()=>{var s=Activator.CreateInstance(T("ScGrenadeState"));Set(s,"Kind",2);Set(s,"Effect",true);Set(s,"Age",2f);Set(s,"Remaining",12f);
                 float D(Vector3 p)=>(float)Call("ScSmokeVolume","Density",s,p,null);
-                return D(new(0,.7f,0))==1&&D(new(3,.2f,0))==1&&D(new(3.75f,.7f,0))==0&&D(new(0,3.5f,0))==0&&D(new(0,0,0))==1&&D(new(0,-.2f,0))==0&&D(new(0,3,0))>0;
+                return D(new(0,.7f,0))==1&&D(new(3,.2f,0))==1&&D(new(3.75f,.7f,0))==0&&D(new(0,3.5f,0))==0&&D(new(0,0,0))==1&&D(new(0,-.2f,0))==0&&D(new(0,3,0))>0
+                    &&D(new(3,3,0))==1&&D(new(0,3,3))==1&&D(new(3.75f,3,0))==0&&D(new(3,3.5f,0))==0;
             });
             foreach(bool lite in new[]{false,true})foreach(float pitch in new[]{0f,.7f,MathF.PI/2})Test($"smoke-billboard-bounds/{lite}/{pitch}",()=>{
                 var policy=T("ScResourcePolicy");string edition=(string)policy.GetProperty("Edition").GetValue(null);var configure=policy.GetMethod("ConfigureEdition",BindingFlags.Static|BindingFlags.NonPublic);
