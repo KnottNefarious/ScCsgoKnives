@@ -564,7 +564,7 @@ public sealed class SubsystemScGrenades : SubsystemBlockBehavior, IUpdateable, I
             // F06: the blast blows a temporary opening into every live smoke it can reach with a clear line; walls and floors stop it.
             Vector3 blast=s.Position+Vector3.UnitY*.3f;
             var reached=m_active.Where(smoke=>smoke.Effect && smoke.Kind==2 && smoke.Remaining>0
-                && Vector3.Distance(blast,ScSmokeVolume.Center(smoke))<ScSmokeDisturbance.Radius+ScSmokeVolume.CurrentRadius(smoke) && Clear(blast,ScSmokeVolume.Center(smoke))).ToArray();
+                && Vector3.Distance(blast,ScSmokeVolume.Center(smoke))<ScSmokeDisturbance.Radius+ScSmokeVolume.BoundingRadius(smoke) && Clear(blast,ScSmokeVolume.Center(smoke))).ToArray();
             if (reached.Length>0 && ScSmokeDisturbance.CanAdd(m_disturbances)) {
                 var opening=new ScSmokeDisturbance { Center=blast };
                 foreach (var smoke in reached) opening.SmokeIds.Add(smoke.Id); // a smoke behind a wall is not on this list and stays whole

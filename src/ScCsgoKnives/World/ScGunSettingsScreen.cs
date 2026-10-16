@@ -37,6 +37,13 @@ public sealed class ScGunSettingsScreen : Screen {
     CheckboxWidget m_enemyNatural;
     ButtonWidget m_enemyLess, m_enemyMore, m_enemyInput, m_enemyDensity;
     LabelWidget m_enemyDays, m_enemyProgress;
+    // Scheduled airdrops (2026-10-12): world rules inside a world (agents installed; read-only on a multiplayer client),
+    // otherwise defaults for new worlds.
+    ScAirdropRules m_airdrop;
+    bool m_airdropWorld;
+    CheckboxWidget m_airdropOn;
+    ButtonWidget m_airdropLess, m_airdropMore, m_airdropInput;
+    LabelWidget m_airdropDays, m_airdropProgress;
     readonly ScGunWorldBackground m_background = new();
     readonly List<(ButtonWidget Button, Color Color)> m_colors = [];
     LabelWidget m_preview, m_status;
@@ -98,6 +105,8 @@ public sealed class ScGunSettingsScreen : Screen {
             m_back = ScreensManager.PreviousScreen; m_working = Capture();
             var project=GameManager.Project;var world=project is null?null:ScEnemyRulesBridge.Read?.Invoke(project);
             m_enemyWorld=world.HasValue;m_enemy=(world??ScUiSettings.EnemyDefaults).Normalize();
+            var airdrop=project is null?null:ScAirdropRulesBridge.Read?.Invoke(project);
+            m_airdropWorld=airdrop.HasValue;m_airdrop=(airdrop??ScUiSettings.AirdropDefaults).Normalize();
         }
         m_returningFromLayout = false;
         m_built = false;
@@ -120,6 +129,7 @@ public sealed class ScGunSettingsScreen : Screen {
         m_content.Children.Add(m_grenadePreview);
         m_content.Children.Add(ScGunUi.Note("红圈：起爆／起火点；蓝圈：落定点。"));
         BuildEnemy(narrow);
+        BuildAirdrop(narrow);
         m_content.Children.Add(ScGunUi.Heading("探员语音"));
         m_content.Children.Add(m_agentVoice);
         if (ScDeathmatchSettings.Open is not null) {
@@ -214,12 +224,46 @@ public sealed class ScGunSettingsScreen : Screen {
         m_enemyProgress.Text=m_enemyWorld&&project is not null&&ScEnemyRulesBridge.Progress is {} progress?progress(project,m_enemy):"";
     }
 
+    bool AirdropReadOnly => m_airdropWorld && ScNet.IsRemoteClient;
+    void BuildAirdrop(bool narrow) {
+        m_content.Children.Add(ScGunUi.Heading("空投"));
+        // A multiplayer client's copy of the world is not the host's rules: show no values it could mistake for them.
+        if(AirdropReadOnly){m_airdropOn=null;m_content.Children.Add(ScGunUi.Note("联机时由房主在自己的设置里调整。"));return;}
+        m_content.Children.Add(ScGunUi.Note(m_airdropWorld?"当前世界的规则，随世界保存。"
+            :GameManager.Project is not null?"当前世界未启用探员包：以下为新世界默认值。"
+            :"新世界默认值；已有世界请在世界内修改。"));
+        m_airdropOn=ScGunUi.Toggle("定期空投",m_airdrop.Enabled);m_content.Children.Add(m_airdropOn);
+        m_airdropLess=ScGunUi.Button("−",64);m_airdropMore=ScGunUi.Button("+",64);m_airdropInput=ScGunUi.Button("输入",96);
+        var days=new StackPanelWidget{Direction=LayoutDirection.Horizontal,HorizontalAlignment=narrow?WidgetAlignment.Near:WidgetAlignment.Far};
+        foreach(var b in new[]{m_airdropLess,m_airdropMore,m_airdropInput}){b.Margin=new Vector2(3,0);days.Children.Add(b);}
+        m_airdropDays=ScGunUi.Label("");m_content.Children.Add(ScGunUi.Row(m_airdropDays,days,narrow));
+        m_airdropProgress=ScGunUi.Note("");m_content.Children.Add(m_airdropProgress);
+        RefreshAirdrop();
+    }
+    void RefreshAirdrop() {
+        m_airdropDays.Text=$"每 {m_airdrop.Days} 个游戏日一次";
+        var project=GameManager.Project;
+        m_airdropProgress.Text=m_airdropWorld&&project is not null&&ScAirdropRulesBridge.Progress is {} progress?progress(project,m_airdrop):"";
+    }
+    void UpdateAirdrop() {
+        if(m_airdropOn is null||AirdropReadOnly)return;
+        m_airdrop=m_airdrop with {Enabled=m_airdropOn.IsChecked};
+        if(m_airdropLess.IsClicked)m_airdrop=(m_airdrop with {Days=m_airdrop.Days-1}).Normalize();
+        if(m_airdropMore.IsClicked)m_airdrop=(m_airdrop with {Days=m_airdrop.Days+1}).Normalize();
+        if(m_airdropInput.IsClicked)DialogsManager.ShowDialog(this,new TextBoxDialog($"空投间隔游戏天数（1～{ScAirdropRules.MaxDays}）",m_airdrop.Days.ToString(),3,text=>{
+            if(text is null)return;
+            if(!int.TryParse(text,out int days)||days<1||days>ScAirdropRules.MaxDays){m_status.Text=$"请输入 1～{ScAirdropRules.MaxDays} 的整数。";return;}
+            m_airdrop=m_airdrop with {Days=days};m_status.Text="";}));
+        RefreshAirdrop();
+    }
+
     public override void Update() {
         if(m_agentVoice.IsClicked){if(ScAgentVoice.OpenSettings is {} settings)settings(this);else DialogsManager.ShowDialog(this,new MessageDialog("探员语音","安装独立的CS探员语音附属包后可选择中文／英文。","知道了",null,null));}
         if(m_deathmatch.IsClicked){if(ScDeathmatchSettings.Open is {} open)open(this);else m_status.Text="请先安装同一批次的死亡竞赛拓展。";return;}
         bool narrow = ActualSize.X > 1 && ActualSize.X < 650;
         if (!m_built || narrow != m_narrow) Build(narrow);
         UpdateEnemy();
+        UpdateAirdrop();
         if(m_recoverView.IsClicked) {
             DialogsManager.ShowDialog(this,new MessageDialog("恢复正常视角？",
                 "将退出 CS 开镜，恢复原版基础视野 100%（80°）和灵敏度 50%，并立即保存。不会重置其他设置、武器或存档；本页取消不会撤销此次恢复。",
@@ -261,19 +305,23 @@ public sealed class ScGunSettingsScreen : Screen {
         }
         if (m_edit.IsClicked) { m_returningFromLayout = true; ScreensManager.SwitchScreen(ScGunLayoutScreen.ScreenName); return; }
         if (m_bindings.IsClicked) { m_returningFromLayout = true; ScreensManager.SwitchScreen(ScGunBindingsScreen.ScreenName); return; }
-        if (m_defaults.IsClicked) { m_working = new(true, true, true, true, ScUiSettings.StyleVanilla, Color.White, false, new(), ScResourcePolicy.Edition == "Optimized512", true, true, true); m_enemy=ScEnemyRules.Default; m_built = false; return; }
+        if (m_defaults.IsClicked) { m_working = new(true, true, true, true, ScUiSettings.StyleVanilla, Color.White, false, new(), ScResourcePolicy.Edition == "Optimized512", true, true, true); m_enemy=ScEnemyRules.Default; if(!AirdropReadOnly)m_airdrop=ScAirdropRules.Default; m_built = false; return; }
         if (m_cancel.IsClicked || Input.Back || Input.Cancel) { Leave(m_back); return; }
         if (m_save.IsClicked) {
-            var previous = Capture();var previousEnemy=ScUiSettings.EnemyDefaults;
+            var previous = Capture();var previousEnemy=ScUiSettings.EnemyDefaults;var previousAirdrop=ScUiSettings.AirdropDefaults;
             Apply(m_working);
             // Outside a world (or without the agents package) the enemy rules are the new-world defaults in this file.
             if(!m_enemyWorld){ScUiSettings.NaturalEnemies=m_enemy.Natural;ScUiSettings.EnemyGraceDays=m_enemy.GraceDays;ScUiSettings.EnemyDensity=m_enemy.Density;}
+            if(!m_airdropWorld){ScUiSettings.AirdropEnabled=m_airdrop.Enabled;ScUiSettings.AirdropDays=m_airdrop.Days;}
             m_status.Text = ScUiSettings.Save() ? "" : "设置未能写入，磁盘上的上一份配置保持不变。";
             if (m_status.Text.Length == 0 && m_enemyWorld && !(GameManager.Project is {} project && ScEnemyRulesBridge.Write?.Invoke(project,m_enemy)==true))
                 m_status.Text = "当前世界已关闭或探员包不可用，敌对小队规则未写入；其他设置已保存。";
+            if (m_status.Text.Length == 0 && m_airdropWorld && !AirdropReadOnly && !(GameManager.Project is {} airdropProject && ScAirdropRulesBridge.Write?.Invoke(airdropProject,m_airdrop)==true))
+                m_status.Text = "当前世界已关闭或探员包不可用，空投规则未写入；其他设置已保存。";
             if (m_status.Text.Length == 0) Leave(m_back);
             else if (!ScUiSettings.Writable || m_status.Text.StartsWith("设置未能")) {
                 Apply(previous);ScUiSettings.NaturalEnemies=previousEnemy.Natural;ScUiSettings.EnemyGraceDays=previousEnemy.GraceDays;ScUiSettings.EnemyDensity=previousEnemy.Density;
+                ScUiSettings.AirdropEnabled=previousAirdrop.Enabled;ScUiSettings.AirdropDays=previousAirdrop.Days;
             }
         }
     }

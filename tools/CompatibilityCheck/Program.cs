@@ -65,6 +65,23 @@ foreach(var reader in readers)T(reader.Name+"/protection-values-survive-older-re
     var back=(Subsystem)latest.New("SubsystemScArmor");back.Load(Read(doc.Element("Subsystems").Elements().Single(e=>(string)e.Attribute("Name")=="ScArmor")));
     var again=new ValuesDictionary();back.Save(again);Require(Xml(again).ToString()==Xml(saved).ToString(),"protection values changed after two older-reader rounds: "+Xml(again));
 });
+foreach(var reader in readers)T(reader.Name+"/airdrop-rules-survive-older-reader-two-rounds",()=>{
+    // airdrop-ladder-hud-smoke-20261012: the agents package's world airdrop rules (switch, days, wait anchor) are a group the
+    // older readers have no template for; it is ignored on their load and absent from their save, and the capsule (listed by
+    // the newer manifest, ScCompatibility.RegisterOwned) puts it back unchanged, so a switched-off or 42-day setting survives.
+    var manifest=new XElement("Compatibility",new XAttribute("Protocol",1),new XElement("Subsystem",new XAttribute("Name","ScAirdropRules")));
+    var group=XElement.Parse("<Values Name='ScAirdropRules'><Value Name='Schema' Type='int' Value='1'/><Value Name='Initialized' Type='bool' Value='True'/>"
+        +"<Value Name='Enabled' Type='bool' Value='False'/><Value Name='Days' Type='int' Value='42'/><Value Name='Anchor' Type='double' Value='123456.5'/></Values>");
+    var doc=Doc(latest.Call("ScCompatibility",null,"Prepare",new XElement("Project",new XElement("Subsystems",new XElement(group)),new XElement("Entities",new XAttribute("NextID",1))),"latest",manifest,(Func<Guid,bool>)(_=>true)));
+    for(int round=0;round<2;round++){
+        doc=Doc(reader.Call("ScCompatibility",null,"Prepare",XElement.Parse(doc.ToString()),reader.Name,new XElement("Compatibility",new XAttribute("Protocol",1)),(Func<Guid,bool>)(_=>true)));
+        doc.Element("Subsystems").Elements().Where(e=>(string)e.Attribute("Name")=="ScAirdropRules").Remove();
+        reader.Call("ScCompatibility",null,"PreserveOpaque",doc);
+        Require(doc.Element("Subsystems").Elements().Count(e=>(string)e.Attribute("Name")=="ScAirdropRules")==1,"the older reader's save lost the airdrop rules");
+    }
+    doc=Doc(latest.Call("ScCompatibility",null,"Prepare",XElement.Parse(doc.ToString()),"latest",manifest,(Func<Guid,bool>)(_=>true)));
+    Require(XNode.DeepEquals(doc.Element("Subsystems").Elements().Single(e=>(string)e.Attribute("Name")=="ScAirdropRules"),group),"airdrop rules changed after two older-reader rounds");
+});
 foreach(var source in modules)foreach(var target in modules.Where(m=>m!=source)){
     string route=source.Name+"->"+target.Name;
     if(source.FindType("SubsystemScStarterEquipment")?.GetMethod("Pending") is not null&&target.FindType("SubsystemScStarterEquipment") is not null)

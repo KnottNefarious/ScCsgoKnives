@@ -8,7 +8,9 @@ public sealed class ScMagazineWidget : CanvasWidget {
     public string Icon = "ak47";
     public readonly LabelWidget Count = new() { FontScale=.55f, DropShadow=true, IsHitTestVisible=false,
         HorizontalAlignment=WidgetAlignment.Far, VerticalAlignment=WidgetAlignment.Far, Margin=new Vector2(1,0) };
-    public ScMagazineWidget() { Size=new Vector2(116,56);HorizontalAlignment=WidgetAlignment.Center;IsHitTestVisible=false;Children.Add(Count); }
+    // The silhouette fills y=2..38. The canvas used to be 56 high for the count below it; with the count hidden
+    // (2026-10-01) that empty strip pushed the rounds line away from the icon (2026-10-12 phone feedback).
+    public ScMagazineWidget() { Size=new Vector2(116,40);HorizontalAlignment=WidgetAlignment.Center;IsHitTestVisible=false;Children.Add(Count); }
     public static float ClampFraction(float value)=>float.IsFinite(value)?Math.Clamp(value,0,1):0;
     public static Color FillColor(float fraction)=>fraction<=.2f?new Color(245,75,65):fraction<=.5f?new Color(245,205,65):new Color(105,225,120);
     public override void MeasureOverride(Vector2 available) { base.MeasureOverride(available);IsDrawRequired=true; }

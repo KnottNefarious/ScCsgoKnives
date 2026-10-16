@@ -76,6 +76,10 @@ public static class ScUiSettings {
     public static int EnemyGraceDays=ScEnemySpawnPolicy.GraceDays;
     public static ScEnemyDensity EnemyDensity=ScEnemyDensity.Standard;
     public static ScEnemyRules EnemyDefaults=>new ScEnemyRules(NaturalEnemies,EnemyGraceDays,EnemyDensity).Normalize();
+    /// <summary>Airdrop defaults for worlds that have no airdrop rules yet, kept like the enemy-squad defaults above.</summary>
+    public static bool AirdropEnabled=true;
+    public static int AirdropDays=ScAirdropRules.DefaultDays;
+    public static ScAirdropRules AirdropDefaults=>new ScAirdropRules(AirdropEnabled,AirdropDays).Normalize();
     public static bool CustomButtons = true;
     public static bool ButtonOnlyFire;
     public static readonly Dictionary<int,int> C4Fuses=[];
@@ -125,6 +129,7 @@ public static class ScUiSettings {
     }
     public static void ResetAll() {
         AmmoHud=new();ArmorHud=ScArmorHud.DefaultPosition();ArmorHudEnabled=true;NaturalEnemies=true;EnemyGraceDays=ScEnemySpawnPolicy.GraceDays;EnemyDensity=ScEnemyDensity.Standard;
+        AirdropEnabled=true;AirdropDays=ScAirdropRules.DefaultDays;
         ScGunBindings.Reset();
         ScGamepadBindings.Keys.Clear(); ScGamepadBindings.Threshold = .5f;
         ResetHand(false); ResetHand(true);
@@ -154,6 +159,8 @@ public static class ScUiSettings {
         public bool NaturalEnemies {get;set;}=true;
         public int EnemyGraceDays {get;set;}=ScEnemySpawnPolicy.GraceDays;
         public int EnemyDensity {get;set;}=(int)ScEnemyDensity.Standard;
+        public bool AirdropEnabled {get;set;}=true;
+        public int AirdropDays {get;set;}=ScAirdropRules.DefaultDays;
         public int Version { get; set; } = ScUiSettings.Version;
         public bool? SimpleMaterials { get; set; }
         public bool CustomButtonsEnabled { get; set; } = true;
@@ -200,6 +207,7 @@ public static class ScUiSettings {
             SimpleMaterials = file.SimpleMaterials ?? (ScResourcePolicy.Edition == "Optimized512");
             AmmoHud=(file.AmmoHud??new()).Normalize();ArmorHud=(file.ArmorHud??ScArmorHud.DefaultPosition()).Normalize();ArmorHudEnabled=file.ArmorHudEnabled;NaturalEnemies=file.NaturalEnemies;
             var enemy=new ScEnemyRules(file.NaturalEnemies,file.EnemyGraceDays,(ScEnemyDensity)file.EnemyDensity).Normalize();EnemyGraceDays=enemy.GraceDays;EnemyDensity=enemy.Density;
+            var airdrop=new ScAirdropRules(file.AirdropEnabled,file.AirdropDays).Normalize();AirdropEnabled=airdrop.Enabled;AirdropDays=airdrop.Days;
             CustomButtons = file.CustomButtonsEnabled;
             ButtonOnlyFire = file.ButtonOnlyFire;
             foreach(var p in file.C4Fuses??[])if(p.Key>=0)C4Fuses[p.Key]=Math.Clamp(p.Value,5,300);
@@ -234,6 +242,7 @@ public static class ScUiSettings {
         try {
             var file = new File {
                 AmmoHud=AmmoHud.Copy().Normalize(),ArmorHud=ArmorHud.Copy().Normalize(),ArmorHudEnabled=ArmorHudEnabled,NaturalEnemies=NaturalEnemies,EnemyGraceDays=EnemyDefaults.GraceDays,EnemyDensity=(int)EnemyDefaults.Density,
+                AirdropEnabled=AirdropDefaults.Enabled,AirdropDays=AirdropDefaults.Days,
                 SimpleMaterials = SimpleMaterials,
                 KeyBindings = new(ScGunBindings.Keys),
                 GamepadBindings = new(ScGamepadBindings.Keys), GamepadTriggerThreshold = ScGamepadBindings.Threshold,

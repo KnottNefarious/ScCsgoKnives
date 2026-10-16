@@ -17,7 +17,7 @@ public sealed class ScGunLayoutScreen : Screen {
     public const string HudId="ammo_hud",ArmorHudId="armor_hud";
     static readonly string[] Entries=[..ScGunFunctions.All,HudId,ArmorHudId];
     ScHudPosition m_hud=new(),m_armor=ScArmorHud.DefaultPosition();
-    readonly CanvasWidget m_hudProxy=new(){Size=new Vector2(116,76),IsHitTestVisible=false,IsVisible=false};
+    readonly CanvasWidget m_hudProxy=new(){Size=ScAmmoHud.MinSize,IsHitTestVisible=false,IsVisible=false};
     readonly CanvasWidget m_armorProxy=new(){Size=ScArmorHud.Size,IsHitTestVisible=false,IsVisible=false};
     readonly ScAmmoHud m_hudSample=new();
     readonly ScArmorHud m_armorSample=new();

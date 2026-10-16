@@ -122,6 +122,13 @@ static class Features130Regression {
                 h.GetType().GetMethod("Show").Invoke(h,[zeus]);
                 Assert(((LabelWidget)Field(h,"Main")).Text=="3.4 s"&&!((LabelWidget)Field(h,"Detail")).IsVisible,"Zeus countdown on its one line");
             });
+            Test("right-hud-icon-canvas-has-no-empty-strip-above-the-line",()=>{
+                // 2026-10-12 phone feedback: the hidden count left an 18-unit empty strip between icon and rounds line.
+                var mag=(CanvasWidget)Activator.CreateInstance(T("ScMagazineWidget"));
+                Assert(mag.Size.Y-38<=2,"icon canvas leaves an empty strip below the silhouette: "+mag.Size.Y);
+                var field=T("ScAmmoHud").GetField("MinSize");Assert(field is not null,"no shared HUD minimum size");var min=(Vector2)field.GetValue(null);
+                Assert(min.X==mag.Size.X&&min.Y>=mag.Size.Y+51*.72f*.5f&&min.Y<=64,"placement minimum does not fit the icon and one line: "+min);
+            });
             Test("hud-hidden-touch-pad-does-not-reserve-space",()=>{
                 foreach(var size in new[]{new Vector2(1187,637),new Vector2(850,478),new Vector2(480,850)})foreach(bool shown in new[]{false,true}) {
                     var host=new CanvasWidget{Size=size};var pad=new CanvasWidget{Name="LookPadContainer",Size=new(160),HorizontalAlignment=WidgetAlignment.Far,VerticalAlignment=WidgetAlignment.Far,MarginBottom=75};

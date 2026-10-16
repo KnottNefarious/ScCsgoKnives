@@ -87,7 +87,7 @@ static class TacticalEnemyRegression {
         var savedTypes=BlocksManager.BlockTypeToIndex.ToArray();var savedNames=BlocksManager.BlockNameToIndex.ToArray();var savedBlocks=(Block[])BlocksManager.Blocks.Clone();
         try{
             // Death drops now resolve real vanilla materials; the isolated runner has no BlocksManager.Initialize.
-            foreach(var (index,block) in new (int,Block)[]{(40,new IronIngotBlock{CraftingId="ironingot"}),(41,new CopperIngotBlock{CraftingId="copperingot"}),(42,new CoalChunkBlock{CraftingId="coalchunk"}),(710,(Block)Activator.CreateInstance(C("ScChickenEggBlock"))),(720,(Block)Activator.CreateInstance(C("ScGrenadeBlock"))),(721,(Block)Activator.CreateInstance(C("ScC4Block")))}){
+            foreach(var (index,block) in new (int,Block)[]{(40,new IronIngotBlock{CraftingId="ironingot"}),(41,new CopperIngotBlock{CraftingId="copperingot"}),(42,new CoalChunkBlock{CraftingId="coalchunk"}),(710,(Block)Activator.CreateInstance(C("ScChickenEggBlock"))),(720,(Block)Activator.CreateInstance(C("ScGrenadeBlock"))),(721,(Block)Activator.CreateInstance(C("ScC4Block"))),(722,(Block)Activator.CreateInstance(C("ScKnifeBlock")))}){
                 block.BlockIndex=index;BlocksManager.Blocks[index]=block;BlocksManager.BlockTypeToIndex[block.GetType()]=index;BlocksManager.BlockNameToIndex[block.GetType().Name]=index;
             }
             FreshRegistry();
@@ -102,19 +102,68 @@ static class TacticalEnemyRegression {
                     Check(refused,"invalid flight timer was silently accepted/reset: "+bad);
                 }
             });
-            Test("airdrop/retry-stable-small-gun-and-mixed-resource-rewards",()=>{
-                var method=T("SubsystemScAirdrops").GetMethod("RewardsFor");var seen=new HashSet<int>();
-                for(int i=0;i<8;i++){
-                    string id=i.ToString("x8")+"445566778899aabbccddeeff";
+            // airdrop-ladder-hud-smoke-20261012 (user: "种类增加食物，护甲，近战兵器，投掷类，弹药类，枪械类，资源类", chosen "每类各一份",
+            // vanilla copper/iron armour, a CS knife): every crate carries one small share of each category, fixed by its identity.
+            Test("airdrop/retry-stable-rewards-one-share-of-every-category",()=>{
+                var method=T("SubsystemScAirdrops").GetMethod("RewardsFor");var guns=new HashSet<int>();bool shells=false;
+                int Index(string name)=>BlocksManager.GetBlockIndex(C(name),true);
+                int gunBlock=Index("ScGunBlock"),ammo=Index("ScAmmoBlock"),grenade=Index("ScGrenadeBlock"),knife=Index("ScKnifeBlock"),material=Index("ScWeaponMaterialBlock");
+                int[] foods=[BreadBlock.Index,CookedMeatBlock.Index,CookedFishBlock.Index,CookedBirdBlock.Index];
+                int[] resources=[IronOreChunkBlock.Index,MalachiteChunkBlock.Index,GermaniumOreChunkBlock.Index,SaltpeterChunkBlock.Index,SulphurChunkBlock.Index,CoalChunkBlock.Index,IronIngotBlock.Index,CopperIngotBlock.Index,material];
+                int[] armour=[33,34,35,36,10,3,4,9];
+                var specOf=C("ScGunBlock").GetMethod("SpecOf");var ammoKind=C("ScReloadTransaction").GetMethod("AmmoKind");
+                for(int i=0;i<64;i++){
+                    string id=i.ToString("x8")+((uint)(i*2654435761u)).ToString("x8")+"8899aabbccddeeff";
                     var first=((int Value,int Count)[])method.Invoke(null,[id]);var again=((int Value,int Count)[])method.Invoke(null,[id]);
-                    Check(first.SequenceEqual(again)&&first.Length==6&&first.Sum(x=>x.Count) is >=9 and <=11,"reward rerolled or exceeded small total");
-                    Check(first[0].Count==1&&Terrain.ExtractContents(first[0].Value)==BlocksManager.GetBlockIndex(C("ScGunBlock"),true),"first reward is not exactly one gun");
-                    Check((bool)C("ScGunBlock").GetMethod("IsKnown").Invoke(null,[first[0].Value]),"new loot gun is not usable");
-                    seen.Add(first[0].Value);
-                    Check(first[1].Count==2&&Terrain.ExtractContents(first[1].Value)==BlocksManager.GetBlockIndex(C("ScAmmoBlock"),true),"magazine reward missing");
-                    Check(Terrain.ExtractContents(first[2].Value)==BlocksManager.GetBlockIndex(C("ScWeaponMaterialBlock"),true)&&Terrain.ExtractContents(first[4].Value)==IronIngotBlock.Index,"CS or vanilla material missing");
+                    string at=$"crate {id}: "+string.Join(",",first.Select(x=>$"{Terrain.ExtractContents(x.Value)}:{Terrain.ExtractData(x.Value)}x{x.Count}"));
+                    Check(first.SequenceEqual(again),"reward rerolled for the same delivery: "+at);
+                    Check(first.Length is >=9 and <=11&&first.All(x=>x.Count>=1),"crate size outside 9-11 slots: "+at);
+                    int Contents(int k)=>Terrain.ExtractContents(first[k].Value);
+                    Check(first[0].Count==1&&Contents(0)==gunBlock&&(bool)C("ScGunBlock").GetMethod("IsKnown").Invoke(null,[first[0].Value]),"first slot is not exactly one usable gun: "+at);
+                    guns.Add(first[0].Value);
+                    int kind=(int)ammoKind.Invoke(null,[specOf.Invoke(null,[first[0].Value])]);shells|=kind==1;
+                    Check(Contents(1)==ammo&&Terrain.ExtractData(first[1].Value)==kind&&first[1].Count is >=2 and <=3,"ammunition missing or not the gun's own: "+at);
+                    var rest=first.Skip(2).ToArray();
+                    var throwables=rest.Where(x=>Terrain.ExtractContents(x.Value)==grenade).ToArray();
+                    Check(throwables.Length is >=1 and <=2&&throwables.Sum(x=>x.Count) is >=1 and <=2&&throwables.All(x=>Terrain.ExtractData(x.Value) is >=0 and <6),"throwables missing or too many: "+at);
+                    Check(rest.Count(x=>Terrain.ExtractContents(x.Value)==knife&&x.Count==1)==1,"no single CS knife: "+at);
+                    var clothing=rest.Where(x=>Terrain.ExtractContents(x.Value)==ClothingBlock.Index).ToArray();
+                    Check(clothing.Length==1&&clothing[0].Count==1&&armour.Contains(ClothingBlock.GetClothingIndex(Terrain.ExtractData(clothing[0].Value))),"no single copper/iron armour piece: "+at);
+                    var food=rest.Where(x=>foods.Contains(Terrain.ExtractContents(x.Value))).ToArray();
+                    Check(food.Length==2&&food[0].Value!=food[1].Value&&food.Sum(x=>x.Count) is >=3 and <=5,"food not 3-5 in two kinds: "+at);
+                    var stuff=rest.Where(x=>resources.Contains(Terrain.ExtractContents(x.Value))).ToArray();
+                    Check(stuff.Length is >=2 and <=3&&stuff.Select(x=>x.Value).Distinct().Count()==stuff.Length&&stuff.All(x=>x.Count<=4),"resources not 2-3 distinct small stacks: "+at);
+                    Check(throwables.Length+1+clothing.Length+food.Length+stuff.Length==rest.Length,"an item outside the seven categories: "+at);
                 }
-                Check(seen.Count==8,"gun pool does not select all eight guns");
+                Check(guns.Count==8,"gun pool does not select all eight guns: "+guns.Count);
+                Check(shells,"the shotgun never came with shells");
+            });
+            Test("airdrop/rules-every-n-days-saved-and-switch-restarts-wait",()=>{
+                var type=T("SubsystemScAirdropRules");var project=new Project();var info=new SubsystemGameInfo{TotalElapsedGameTime=5000};
+                project.m_subsystems.Add(info);project.m_subsystems.Add(new SubsystemTimeOfDay());
+                Subsystem Make(ValuesDictionary v){var s=(Subsystem)Activator.CreateInstance(type);s.m_project=project;s.Load(v);return s;}
+                var rulesType=C("ScAirdropRules");var set=type.GetMethod("Set");void Rules(object s,bool on,int days)=>set.Invoke(s,[Activator.CreateInstance(rulesType,[on,days])]);
+                Subsystem fresh=Make(new ValuesDictionary());dynamic d=fresh;
+                Check(d.FromDefaults&&d.Rules.Enabled&&d.Rules.Days==15,"a world without airdrop rules did not take the 15-day default");
+                Check(!d.Due,"a world seen for the first time got a drop at once");
+                info.TotalElapsedGameTime=5000+15*1200-1;Check(!d.Due,"due before 15 in-game days");
+                info.TotalElapsedGameTime=5000+15*1200;Check(d.Due,"not due after 15 in-game days");
+                d.Delivered();Check(!d.Due,"a delivered drop did not restart the wait");
+                Rules(fresh,true,3);info.TotalElapsedGameTime+=3*1200;Check(d.Due,"a new interval does not count from the last drop");
+                Rules(fresh,false,3);Check(!d.Due,"due while switched off");
+                info.TotalElapsedGameTime+=100*1200;Rules(fresh,true,3);Check(!d.Due,"turning the switch on dropped at once instead of starting the wait");
+                var saved=new ValuesDictionary();fresh.Save(saved);Subsystem back=Make(Round(saved));dynamic b=back;
+                Check(!b.FromDefaults&&b.Rules.Enabled&&b.Rules.Days==3&&!b.Due,"rules or timer lost in the XML round trip");
+                info.TotalElapsedGameTime+=3*1200;Check(b.Due,"the saved wait was not kept");
+                foreach(double bad in new[]{double.NaN,-1d,double.PositiveInfinity}){
+                    var malformed=Round(saved);malformed.SetValue("Anchor",bad);bool refused=false;
+                    try{Make(malformed);}catch(InvalidOperationException){refused=true;}
+                    Check(refused,"an invalid airdrop timer was silently reset: "+bad);
+                }
+                var wide=Round(saved);wide.SetValue("Days",0);dynamic clamped=Make(wide);Check(clamped.Rules.Days==1,"out-of-range days not clamped");
+                // The 1.5.0 reader refuses a countdown outside 0-900: the director keeps writing one it accepts.
+                var director=(Subsystem)Activator.CreateInstance(T("SubsystemScAirdrops"));var legacy=new ValuesDictionary();director.Save(legacy);
+                Check(legacy.GetValue<int>("Schema")==1&&legacy.GetValue<float>("Next") is >=0 and <=900,"the old countdown left the range 1.5.0 accepts");
             });
             foreach(bool creative in new[]{false,true})foreach(bool silenced in new[]{false,true})Test($"feedback/heard-player-shot-real-noise-routing/{creative}/{silenced}",()=>{
                 var f=World();f.Info.WorldSettings.GameMode=creative?GameMode.Creative:GameMode.Survival;

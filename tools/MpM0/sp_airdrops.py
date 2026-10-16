@@ -51,8 +51,11 @@ def main(label, package):
         reload();resumed=state('resumed');check('fall survives save/reload with same identity',resumed['drops'][0]['Id']==falling['drops'][0]['Id'] and resumed['drops'][0]['Fall']<=falling['drops'][0]['Fall'])
         poll(g,AD+'return (ad.Drops.Count==1&&ad.Drops[0].Landed).ToString();',lambda x:x=='True',45)
         landed=state('landed');stocks=landed['chests']
-        check('native chest has one gun and five modest resource stacks',len(stocks)==1 and len(stocks[0])==16
-            and stocks[0][0]==1 and stocks[0][1]==2 and 1<=stocks[0][2]<=3 and stocks[0][3]==1 and stocks[0][4:6]==[2,2] and all(n==0 for n in stocks[0][6:]),stocks)
+        # airdrop-ladder-hud-smoke-20261012: one small share of every category (gun, its ammunition, throwables, a knife,
+        # armour, food, resources) in 9-11 slots of the native 16-slot chest; the exact kinds are offline-checked.
+        filled=[n for n in stocks[0] if n>0] if len(stocks)==1 else []
+        check('native chest has one gun, its ammunition and a small share of every category',len(stocks)==1 and len(stocks[0])==16
+            and stocks[0][0]==1 and 2<=stocks[0][1]<=3 and 9<=len(filled)<=11 and all(n>0 for n in stocks[0][:len(filled)]) and all(n==0 for n in stocks[0][len(filled):]),stocks)
         check('five guards created once',len(landed['guards'])==5,landed)
         patrol=AD+'return System.Text.Json.JsonSerializer.Serialize(project.FindSubsystem<Game.SubsystemTacticalEnemies>(true).Enemies.Where(e=>e.State.Squad.StartsWith("airdrop-")).Select(e=>new {id=e.Entity.Id,x=e.Creature.ComponentBody.Position.X,z=e.Creature.ComponentBody.Position.Z}));'
         g.func(MAIN+f'pl.ComponentBody.Position=new Engine.Vector3({x}f+.5f,project.FindSubsystem<Game.SubsystemTerrain>(true).Terrain.GetTopHeight({x},{z-42})+2,{z-42}f+.5f);pl.ComponentBody.Velocity=Engine.Vector3.Zero;return "outside perception";')
@@ -64,17 +67,37 @@ def main(label, package):
         check('guard acquires nearby player without provocation',True)
         # Remove half the first stack through the native chest API, then reload and verify no refill.
         take=MAIN+f'var c=project.FindSubsystem<Game.SubsystemBlockEntities>(true).GetBlockEntity({x},{y},{z+9}).Entity.FindComponent<Game.ComponentChest>(true); '
-        check('native partial withdrawal',g.func(take+'return c.RemoveSlotItems(4,1).ToString();')=='1')
-        reload();saved=state('partial-reload');check('reload neither refills nor duplicates chest',len(saved['chests'])==1 and saved['chests'][0][4]==1 and len(saved['guards'])==5,saved)
+        check('native partial withdrawal',g.func(take+'return c.RemoveSlotItems(1,1).ToString();')=='1')
+        reload();saved=state('partial-reload');check('reload neither refills nor duplicates chest',len(saved['chests'])==1 and saved['chests'][0][1]==stocks[0][1]-1 and len(saved['guards'])==5,saved)
         transfer=g.func(take+'int value=c.GetSlotValue(0);var inv=pl.ComponentMiner.Inventory;inv.RemoveSlotItems(0,inv.GetSlotCount(0));inv.AddSlotItems(0,value,1);if(inv.GetSlotCount(0)!=1||inv.GetSlotValue(0)!=value)return "refused";c.RemoveSlotItems(0,1);inv.ActiveSlotIndex=0;return Game.ScGunBlock.IsKnown(value).ToString();')
         check('airdrop gun can be withdrawn as a usable gun',transfer=='True',transfer)
-        time.sleep(1.5);before_gun=json.loads(g.func(GUN_STATE));ray=g.func(RAY);g.cmd('DIG_RAY '+ray+' 20');time.sleep(2)
-        fired=json.loads(g.func(GUN_STATE));check('withdrawn gun actually fires',fired['usable'] and fired['rounds']<before_gun['rounds'],[before_gun,fired])
+        time.sleep(1.5);before_gun=json.loads(g.func(GUN_STATE))
+        if before_gun['gun'] in ('ssg08','awp'):
+            # 2026-10-12 (diag_fire): this harness's single DIG_RAY press does not fire a fresh bolt-action sniper on the
+            # official 1.5.0 either (an AK fires); reported separately, so the check is recorded as not run, not passed.
+            result['checks'].append(dict(name='withdrawn gun actually fires',ok=None,detail='NOT RUN for '+before_gun['gun']+': the harness press does not fire a fresh bolt-action sniper on the official 1.5.0 either'))
+            print('NOT RUN withdrawn gun actually fires ('+before_gun['gun']+')',flush=True);fired=before_gun
+        else:
+            ray=g.func(RAY);g.cmd('DIG_RAY '+ray+' 20');time.sleep(2)
+            fired=json.loads(g.func(GUN_STATE));check('withdrawn gun actually fires',fired['usable'] and fired['rounds']<before_gun['rounds'],[before_gun,fired])
         reload();gun_saved=json.loads(g.func(GUN_STATE));check('used airdrop gun persists without replenishment',gun_saved['usable'] and gun_saved['id']==fired['id'] and gun_saved['rounds']==fired['rounds'],gun_saved)
         g.func(take+'for(int i=0;i<c.SlotsCount;i++)c.RemoveSlotItems(i,c.GetSlotCount(i));return "empty";')
         reload();empty=state('empty-reload');check('empty crate stays empty after reload',len(empty['chests'])==1 and sum(empty['chests'][0])==0,empty)
         g.func(MAIN+f'project.FindSubsystem<Game.SubsystemTerrain>(true).ChangeCell({x},{y},{z+9},0);return "removed";')
         time.sleep(1);gone=state('removed');check('removing empty crate clears smoke and chest',not gone['drops'] and not gone['chests'],gone)
+        # The schedule (2026-10-12): every N in-game days by this world's rules, its own switch, a wait restarted by turning it on.
+        rules=AD+('var rules=project.FindSubsystem<Game.SubsystemScAirdropRules>(true); var info=project.FindSubsystem<Game.SubsystemGameInfo>(true); '
+            'float day=project.FindSubsystem<Game.SubsystemTimeOfDay>(true).DayDuration; ')
+        fresh=g.func(rules+'return rules.Rules.Enabled+" "+rules.Rules.Days+" "+rules.Due;')
+        check('a new world waits 15 in-game days for its first airdrop',fresh=='True 15 False',fresh)
+        g.func(rules+'Game.ScAirdropRulesBridge.Write(project,new Game.ScAirdropRules(false,1)); info.TotalElapsedGameTime+=2*day; return "off, two days later";')
+        time.sleep(40);check('switched off: no airdrop although the days passed',g.func(AD+'return ad.Drops.Count.ToString();')=='0')
+        on=g.func(rules+'Game.ScAirdropRulesBridge.Write(project,new Game.ScAirdropRules(true,1)); return rules.Due.ToString();')
+        check('turning the switch on starts a new wait',on=='False',on)
+        due=g.func(rules+'info.TotalElapsedGameTime+=day; return rules.Due.ToString();');check('one in-game day later the airdrop is due',due=='True',due)
+        started=poll(g,AD+'return ad.Drops.Count.ToString();',lambda v:v!='0',150)
+        check('a due airdrop actually starts near the player',started!='0',started)
+        again=g.func(rules+'return rules.Due.ToString();');check('the wait restarts after the delivery',again=='False',again)
         result['gameErrors']=g.errors();check('no game errors',not result['gameErrors'],result['gameErrors'])
     except Exception as e:
         result['failure']=str(e);print('FAILURE',str(e),flush=True)

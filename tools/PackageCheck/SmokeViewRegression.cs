@@ -209,15 +209,15 @@ static class SmokeViewRegression {
         return true;
     }
 
-    /// <summary>How far outside the dome's soft edge (radius + .35 m, heights scaled as ScSmokeVolume.Density does) the
-    /// segment passes; negative when it enters.</summary>
+    /// <summary>How far outside the cylinder's soft edge (radius + .35 m around, height + .35 m above the centre, the height
+    /// following the radius as ScSmokeVolume.CurrentHeight does) the segment passes; negative when it enters.</summary>
     static float Miss(Vector3 a, Vector3 b, Vector3 center, float radius) {
         float best = float.MaxValue;
         for (int i = 0; i <= 200; i++) {
             Vector3 p = Vector3.Lerp(a, b, i / 200f), o = p - center;
             if (p.Y < -.12f) continue;
-            o.Y = Math.Max(0, o.Y) * 3.75f / 2.8f;
-            best = Math.Min(best, o.Length() - (radius + .35f));
+            float height = radius * 2.8f / 3.75f, across = MathF.Sqrt(o.X * o.X + o.Z * o.Z);
+            best = Math.Min(best, Math.Max(across - (radius + .35f), o.Y - (height + .35f)));
         }
         return best;
     }

@@ -18,6 +18,9 @@ static class TacticalFeedbackRegression {
     sealed class Absorb:ModLoader {public override void ProcessAttackment(Attackment attackment){attackment.AttackPower=0;}}
     sealed class PlainHealth:ComponentHealth {public override void Injure(Injury injury){injury.Attackment.EnableHitValueParticleSystem=false;base.Injure(injury);}}
     sealed class Slab:DirtBlock {public override BoundingBox[] GetCustomCollisionBoxes(SubsystemTerrain t,int value)=>[new BoundingBox(Vector3.Zero,new Vector3(1,.5f,1))];}
+    /// <summary>A ladder slab on its wall side (never Initialize: no model in the isolated runner).</summary>
+    sealed class Ladder:LadderBlock {public Ladder():base("Models/Ladder",.0625f){} public override BoundingBox[] GetCustomCollisionBoxes(SubsystemTerrain t,int value){
+        var p=-CellFace.FaceToPoint3(GetFace(Terrain.ExtractData(value)));var min=new Vector3(p.X>0?.94f:0,0,p.Z>0?.94f:0);var max=new Vector3(p.X<0?.06f:1,1,p.Z<0?.06f:1);return [new BoundingBox(min,max)];}}
     internal static List<TacticalRegression.Result> Run(Assembly core,Assembly dlc){
         var results=new List<TacticalRegression.Result>();
         void Test(string n,Action a){try{a();results.Add(new("agent-feedback/"+n,true,""));}catch(Exception ex){results.Add(new("agent-feedback/"+n,false,ex.ToString()));}}
@@ -117,6 +120,40 @@ static class TacticalFeedbackRegression {
                     Check((bool)assist.Invoke(null,args)&&creature.ComponentLocomotion.JumpOrder==1,"no jump at a detected step");
                     creature.ComponentLocomotion.JumpOrder=0;args[4]=1.2d;Check(!(bool)assist.Invoke(null,args)&&creature.ComponentLocomotion.JumpOrder==0,"jump repeated inside the cooldown");
                     Set(9,61,8,0);args[4]=5d;Check(!(bool)assist.Invoke(null,args),"jump ordered on flat ground");
+                }finally{Array.Copy(oldBlocks,BlocksManager.Blocks,oldBlocks.Length);}
+            });
+            // airdrop-ladder-hud-smoke-20261012 ("探员和匪好像都不会爬梯子"): a climb is planned along the ladder's wall to a standable
+            // landing beside its top (and back down), only toward the goal; a ladder that failed is skipped for its cooldown.
+            Test("ladder-plan-up-down-landing-goal-and-failure-cooldown",()=>{
+                var terrain=new SubsystemTerrain{Terrain=new Terrain()};terrain.Terrain.AllocateChunk(0,0).State=TerrainChunkState.Valid;
+                var oldBlocks=(Block[])BlocksManager.Blocks.Clone();
+                try{
+                    BlocksManager.Blocks[0]=new AirBlock{IsCollidable=false};BlocksManager.Blocks[2]=new DirtBlock{BlockIndex=2,IsCollidable=true};BlocksManager.Blocks[59]=new Ladder{BlockIndex=59,IsCollidable=true};
+                    void Set(int x,int y,int z,int v)=>terrain.Terrain.SetCellValueFast(x,y,z,v);
+                    for(int x=2;x<15;x++)for(int z=2;z<15;z++)Set(x,60,z,2);
+                    // A five-high pillar at x=10 with a ladder on its -X face (placed on face 3, so it hangs on the +X wall).
+                    for(int y=61;y<=65;y++){Set(10,y,8,2);Set(9,y,8,Terrain.MakeBlockValue(59,0,LadderBlock.SetFace(0,3)));}
+                    var type=T("TacticalLadderClimb");var plan=type.GetMethod("Plan");
+                    dynamic Plan(Vector3 feet,Vector3 goal)=>plan.Invoke(null,[terrain,9,8,feet,goal,1.8f]);
+                    Vector3 ground=new(8.5f,61,8.5f),pillar=new(10.5f,66,8.5f);
+                    var up=Plan(ground,pillar);Check(up is not null,"no plan up the ladder to the owner on the pillar");
+                    Check(up.Item1==new Point3(10,66,8)&&up.Item2==61&&up.Item3==65,$"wrong landing or extent going up: {up}");
+                    var down=Plan(pillar,ground);Check(down is not null&&down.Item1==new Point3(10,66,8)&&down.Item2==61&&down.Item3==65,$"no plan down from the pillar top: {down}");
+                    Check(Plan(ground,new Vector3(14.5f,66,40.5f)) is null,"a ladder far from the goal was planned as a detour");
+                    Check(Plan(new Vector3(4.5f,61,4.5f),pillar) is not null,"the climb must not depend on the agent's own distance to the column");
+                    Set(10,66,8,2);Set(10,67,8,2);
+                    Check(Plan(ground,pillar) is null,"a ladder without a standable landing beside its top was planned");
+                    Set(10,66,8,0);Set(10,67,8,0);
+                    var body=new ComponentBody{BoxSize=new Vector3(.65f,1.8f,.65f),Position=ground,MaxSmoothRiseHeight=.51f};
+                    var creature=new ComponentCreature{ComponentBody=body,ComponentLocomotion=new ComponentLocomotion{LadderSpeed=2.5f},ComponentHealth=new PlainHealth{Health=1}};
+                    var path=new ComponentPathfinding{m_componentPilot=new ComponentPilot{m_componentCreature=creature}};
+                    var tryStart=type.GetMethod("TryStart");var update=type.GetMethod("Update");
+                    var flat=Activator.CreateInstance(type);Check(!(bool)tryStart.Invoke(flat,[creature,terrain,path,ground+new Vector3(3,1,0),5,0d]),"a one-step rise started a ladder climb");
+                    object instance=Activator.CreateInstance(type);dynamic climb=instance;
+                    Check((bool)tryStart.Invoke(instance,[creature,terrain,path,pillar,5,0d])&&climb.Up&&climb.Column==new Point3(9,0,8)&&climb.Busy,"climb not started toward the owner on the pillar");
+                    Check(!(bool)update.Invoke(instance,[creature,terrain,path,100d])&&!climb.Busy,"a climb past its deadline still owns the movement");
+                    Check(!(bool)tryStart.Invoke(instance,[creature,terrain,path,pillar,5,110d]),"a failed ladder was retried inside its cooldown");
+                    Check((bool)tryStart.Invoke(instance,[creature,terrain,path,pillar,5,130d]),"the ladder stayed unusable after its cooldown");
                 }finally{Array.Copy(oldBlocks,BlocksManager.Blocks,oldBlocks.Length);}
             });
             Test("navigation-replans-only-on-real-change",()=>{

@@ -92,7 +92,7 @@ public static class ScGrenadeVisuals {
     public static Color SmokeInside(float smoke) => new(106,106,106,(int)(255*Math.Clamp(smoke,0,1)));
     /// <summary>Puffs of one smoke: the same number at every distance (post-mp-bugs-20260930 item 2: the former 18/40 m
     /// bands changed the count, and the layout with it, as the viewer crossed them). <see cref="SmokeCoreCount"/> of them
-    /// are the centred cores that make the cloud solid; the rest fill the dome.</summary>
+    /// are the centred cores that make the cloud solid; the rest fill the cylinder.</summary>
     public static int SmokePuffCount => ScResourcePolicy.Lite ? 64 : 128;
     public static int SmokeCoreCount => ScResourcePolicy.Lite ? 4 : 8;
     /// <summary>A filling puff's half-size as a fraction of the cloud radius (<see cref="SmokePuffMin"/> to
@@ -101,21 +101,23 @@ public static class ScGrenadeVisuals {
     /// of their places.</summary>
     public const float SmokePuffMin=.30f, SmokePuffSpan=.14f;
     /// <summary>The cloud's surface (2026-10-01 user request: "边缘、表面看起来要平滑", the textured puffs left the outline bitten
-    /// here and there): <see cref="SmokeShellCount"/> of the puffs are smooth round ones (<see cref="SmoothPuffKey"/>) on an
-    /// even Fibonacci lattice over the dome, <see cref="SmokeShellRadius"/> of the cloud radius out and
-    /// <see cref="SmokeShellHeight"/> of its height up, each <see cref="SmokeShellSize"/> radii in half-size: so many overlap
-    /// that their union is a smooth dome. The cores and the remaining textured puffs stay inside it.</summary>
+    /// here and there): <see cref="SmokeShellCount"/> of the puffs are smooth round ones (<see cref="SmoothPuffKey"/>), each
+    /// <see cref="SmokeShellSize"/> radii in half-size: two thirds spread evenly over the cylinder's wall,
+    /// <see cref="SmokeShellRadius"/> of the cloud radius out, from the lowest to the highest place a puff fits; one third on
+    /// an annulus at that top height reaching <see cref="SmokeRimRadius"/> of the radius, over its rim (2026-10-12: the same
+    /// width at every height). So many overlap that their union is a smooth cylinder with a rounded rim. The cores and the
+    /// remaining textured puffs stay inside it.</summary>
     public static int SmokeShellCount => ScResourcePolicy.Lite ? 36 : 72;
-    public const float SmokeShellRadius=.72f, SmokeShellHeight=.62f, SmokeShellSize=.40f;
+    public const float SmokeShellRadius=.72f, SmokeRimRadius=.84f, SmokeShellSize=.40f;
     /// <summary>The generated smooth puff texture (2x2 variants), drawn with the smoke's own quads; not a package asset.</summary>
     public const int SmoothPuffKey=5, SmoothPuffCell=128;
     /// <summary>The cloud's puffs, laid out in world space (post-mp-bugs-20260930 item 2). Every place, size and texture
     /// turn is a function of the puff's index and the smoke's age alone - never of the viewer's distance or direction -
     /// and every puff is sized and placed so that <see cref="SmokeAxes"/>' cloud-bounds fit is never engaged from any
-    /// direction (its horizontal bound less the quad's reach, the floor and the dome's top): the drawn quad keeps the same
+    /// direction (its horizontal bound less the quad's reach, the floor and the cylinder's top): the drawn quad keeps the same
     /// size wherever it is seen from. The cores sit on the centre (a centred disc facing the viewer has the same outline
-    /// from every side); the filling puffs are spread over the dome's area, its bottom half wide as the CS2 smoke
-    /// billows out at ground level, its top narrowing. The cloud still grows, pulses and drifts slowly with age.
+    /// from every side); the filling puffs are spread over the cylinder's full width at every height (2026-10-12; the
+    /// former dome narrowed above the centre). The cloud still grows, pulses and drifts slowly with age.
     /// <paramref name="distance"/> is accepted for callers but does not change the result.</summary>
     public static List<Sprite> Smoke(ScGrenadeState s,float distance) {
         List<Sprite> list=[];
@@ -129,7 +131,7 @@ public static class ScGrenadeVisuals {
             float u=Hash(i+seed),v=Hash(i*7+11+seed),w=Hash(i*13+29+seed),h=Hash(i+41+seed);
             float width,tall,y; Vector3 offset;
             // The vertical band a square puff of half-size `size` fits in without the floor (-0.8 under the ground) or
-            // the dome's top reshaping it from any direction; a young cloud (or a big puff) squeezes the band to a line,
+            // the cylinder's top reshaping it from any direction; a young cloud (or a big puff) squeezes the band to a line,
             // then the size follows. Square: SmokeAxes swaps a puff's height for its width when seen from above.
             (float Size,float Low,float High) Band(float size) {
                 // The reach includes the 2% pulse, so a puff at the band's edge never crosses the fit even at full swell.
@@ -143,13 +145,15 @@ public static class ScGrenadeVisuals {
                 var band=Band(radius*.58f); width=tall=band.Size;
                 y=Math.Clamp(ScSmokeVolume.GroundCenter+.75f,band.Low,band.High); offset=new Vector3(0,y,0);
             } else if(i<cores+shell) {
-                // The smooth surface: an even (golden-angle) lattice over the upper half of an ellipsoid, uniform in area, so
-                // neighbouring round puffs overlap by far more than their spacing and the outline has no notches.
-                int k=i-cores; var band=Band(radius*SmokeShellSize); float size=band.Size;
-                float up=(k+.5f)/shell,across=MathF.Sqrt(Math.Max(0,1-up*up));
+                // The smooth surface: an even (golden-angle) lattice over the cylinder's wall, then its top disc (uniform in
+                // area), so neighbouring round puffs overlap by far more than their spacing and the outline has no notches.
+                int k=i-cores,wall=shell-shell/3; var band=Band(radius*SmokeShellSize); float size=band.Size,across;
+                // The top third is an annulus at the highest place a puff fits: the cylinder's top rim, which a grazing line of
+                // sight crosses, is as solid as its foot; the cores already cover the middle of the top from above.
+                if(k<wall){ across=SmokeShellRadius; y=MathUtils.Lerp(band.Low,band.High,(k+.5f)/wall); }
+                else{ across=SmokeRimRadius*MathF.Sqrt(MathUtils.Lerp(.36f,1f,(k-wall+.5f)/(shell-wall))); y=band.High; }
                 float azimuth=k*2.3999632f+Hash(seed+3)*MathF.Tau+s.Age*.02f;
-                y=Math.Clamp(ScSmokeVolume.GroundCenter+up*height*SmokeShellHeight,band.Low,band.High);
-                offset=new Vector3(MathF.Cos(azimuth)*across*SmokeShellRadius*radius,y,MathF.Sin(azimuth)*across*SmokeShellRadius*radius);
+                offset=new Vector3(MathF.Cos(azimuth)*across*radius,y,MathF.Sin(azimuth)*across*radius);
                 width=tall=size; texture=SmoothPuffKey; frame=k&3;
             } else {
                 var band=Band(radius*(SmokePuffMin+SmokePuffSpan*h)); float size=band.Size;
@@ -158,12 +162,10 @@ public static class ScGrenadeVisuals {
                 y=MathUtils.Lerp(band.Low,band.High,MathF.Pow(w,1.5f));
                 // Horizontal reach: 1.3 radii less the quad's reach (at most its half-size in any world axis), so a puff
                 // never covers a line of sight that passes a metre outside the density's soft edge; never past the
-                // density radius; above the centre the dome narrows.
+                // density radius, at every height (2026-10-12: the cylinder no longer narrows above the centre).
                 // Inside the smooth shell (2026-10-01): a textured puff's reach stays under 0.95 radii, so its ragged edge never
                 // becomes the cloud's outline.
                 float ringMax=Math.Max(0f,Math.Min(1f,.95f-size/radius));
-                float aboveCentre=Math.Max(0,y-ScSmokeVolume.GroundCenter);
-                if(aboveCentre>0&&height>0) ringMax*=MathF.Sqrt(Math.Max(0,1-aboveCentre*aboveCentre/(height*height)));
                 float ring=MathF.Sqrt(u)*ringMax;   // uniform over the disc: the centre is as covered as the rim
                 float azimuth=v*MathF.Tau+s.Age*(i%2==0?.03f:-.02f);
                 offset=new Vector3(MathF.Cos(azimuth)*ring*radius,y,MathF.Sin(azimuth)*ring*radius);

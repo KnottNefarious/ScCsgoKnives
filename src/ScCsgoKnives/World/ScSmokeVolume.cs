@@ -6,7 +6,8 @@ public static class ScSmokeVolume {
     // turbulent cloud. It does not visibly collapse into a small ball during dissipation.
     // Lifetime: 20 s from the bloom to the end of the fade (2026-10-01 user request; was 18).
     public const float Radius=3.75f, HalfHeight=2.8f, GroundCenter=.7f, Lifetime=20, GrowthSeconds=.72f, DissipationSeconds=1.25f;
-    // A ground-cut dome: wide at foot level rather than a sphere touching the floor at one point.
+    // An upright cylinder standing on the floor: the same radius at every height (2026-10-12 player feedback: "把烟雾弹的烟的
+    // 半径都改成一样吧，现在版本下面半径长上头小"; replaces the ground-cut dome). HalfHeight is its height above the centre.
     public static Vector3 Center(ScGrenadeState s) => s.Position+Vector3.UnitY*GroundCenter;
     public static float Growth(ScGrenadeState s) {
         float t=Math.Clamp(s.Age/GrowthSeconds,0,1);
@@ -20,6 +21,9 @@ public static class ScSmokeVolume {
     }
     public static float CurrentRadius(ScGrenadeState s) => Radius*Growth(s)*(.93f+.07f*Dissipation(s));
     public static float CurrentHeight(ScGrenadeState s) => CurrentRadius(s)*HalfHeight/Radius;
+    /// <summary>Distance from <see cref="Center"/> to the cylinder's farthest point (its top rim): every query that first tests
+    /// a sphere around the centre must use this, or it would miss the smoke the player sees in the top corners.</summary>
+    public static float BoundingRadius(ScGrenadeState s) { float r=CurrentRadius(s),h=CurrentHeight(s); return MathF.Sqrt(r*r+h*h); }
     /// <summary>Length of the finite eye-target segment inside the sphere, not an infinite ray.</summary>
     public static float InsideLength(Vector3 start,Vector3 end,Vector3 center,float radius) {
         Vector3 delta=end-start;float length=delta.Length();if (length<.001f || radius<=0) return 0;
@@ -28,20 +32,21 @@ public static class ScSmokeVolume {
         if (disc<=0) return 0;
         float root=MathF.Sqrt(disc);return Math.Max(0,Math.Min(length,-projection+root)-Math.Max(0,-projection-root));
     }
-    /// <summary>F07 unified density: 1 inside the current sphere, 0 outside, minus any HE opening (F06).
+    /// <summary>F07 unified density: 1 inside the current cylinder (soft 0.35 m side and top edges), 0 outside or under the
+    /// floor, minus any HE opening (F06).
     /// Rendering, the inside overlay and the AI sight query all read this.</summary>
     public static float Density(ScGrenadeState s,Vector3 point,IEnumerable<ScSmokeDisturbance> disturbances=null) {
         if (!s.Effect || s.Kind!=2 || s.Remaining<=0) return 0;
         float radius=CurrentRadius(s); if (radius<=0) return 0;
         if(point.Y<s.Position.Y-.12f)return 0;
-        Vector3 offset=point-Center(s);offset.Y=Math.Max(0,offset.Y)*Radius/HalfHeight;
-        float inside=Math.Clamp((radius-offset.Length())/.35f,0,1);
+        Vector3 offset=point-Center(s);float across=MathF.Sqrt(offset.X*offset.X+offset.Z*offset.Z);
+        float inside=Math.Clamp(Math.Min(radius-across,CurrentHeight(s)-offset.Y)/.35f,0,1);
         return inside*Dissipation(s)*(1-ScSmokeDisturbance.Clearing(disturbances,point,s));
     }
     /// <summary>Smoke-filled length of the segment: the same Density the overlay and the sprites use, integrated every
     /// 0.25 m, so the AI's sight edge is the soft edge the player sees and an HE opening reads the same for both.</summary>
     public static float EffectiveInsideLength(Vector3 start,Vector3 end,ScGrenadeState s,IEnumerable<ScSmokeDisturbance> disturbances) {
-        if (InsideLength(start,end,Center(s),CurrentRadius(s)+.5f)<=0) return 0; // segment clear of the soft edge too
+        if (InsideLength(start,end,Center(s),BoundingRadius(s)+.5f)<=0) return 0; // segment clear of the whole cylinder
         Vector3 delta=end-start;float length=delta.Length();if (length<.001f) return 0;
         Vector3 direction=delta/length;const float step=.25f;float sum=0;
         for (float t=step*.5f;t<length;t+=step) sum+=step*Density(s,start+direction*t,disturbances);
