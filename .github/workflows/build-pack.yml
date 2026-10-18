@@ -1,0 +1,41 @@
+name: Build and Pack ScCsgoKnives
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Restore NuGet packages
+        run: dotnet restore ScCsgoKnives.sln
+
+      - name: Build solution (Release)
+        run: DOTNET_ROLL_FORWARD=Major dotnet build ScCsgoKnives.sln -c Release
+
+      - name: Install Python deps (if present)
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f tools/requirements-gun-skins.txt ]; then pip install -r tools/requirements-gun-skins.txt || true; fi
+
+      - name: Run pack script
+        run: python -X utf8 tools/pack_scmod.py --edition all
+
+      - name: Upload generated .scmod files
+        uses: actions/upload-artifact@v4
+        with:
+          name: scmods
+          path: output/*.scmod
